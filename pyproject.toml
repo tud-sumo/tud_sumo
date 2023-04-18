@@ -4,10 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tud_sumo"
-version = "1.0.0"
 description = "TU Delft SUMO wrapper"
 readme = "README.md"
-authors = [{ name = Callum Evans", email = "c.evans@tudelft.nl" }]
+authors = [{ name = "Callum Evans", email = "c.evans@tudelft.nl" }]
 license = { file = "LICENSE" }
 classifiers = [
     "License :: OSI Approved :: MIT License",
@@ -15,7 +14,6 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 requires-python = ">=3.9"
-license = {text = "MIT License"}
 dependencies = [
     "traci", "matplotlib", "tqdm",
 ]
