@@ -3,3 +3,4 @@ dist/*
 tud_sumo.egg-info/*
 pyproject.toml
 setup.py
+instructions.webloc
