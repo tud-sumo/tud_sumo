@@ -1,6 +1,6 @@
 # TU Delft SUMO Wrapper
 
-Python SUMO wrapper, using traci.
+Python SUMO wrapper, using traci, written for AIM Lab at TU Delft. Download with [pip](https://pypi.org/project/tud-sumo/) or from [GitHub](https://github.com/calluume/tud_sumo).
 
 ## Requirements 
 
@@ -9,7 +9,9 @@ Required packages are: `tqdm`, `matplotlib` and `traci`.
 ## Usage example
 
 ```python    
-sim = Simulation()
+from tud_sumo import tud_sumo
+
+sim = tud_sumo.Simulation()
 
 # The phase dictionary is a dictionary containing the phases and times
 # for a given junction, eg:
