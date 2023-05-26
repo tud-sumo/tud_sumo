@@ -26,3 +26,5 @@ sim_data = sim.step_to(n_steps=3600, prev_data=sim_data) # Run for 3600 steps (u
 
 sim.end()
 ```
+
+`example_data.json` shows the output of the `step_to` function. Limiting the API calls to traci will improve performance, which can be done by using `vTypes` to only collect vehicle data for specific types or by setting `get_individual_vehicles` to False to only collect aggregated vehicle data.
