@@ -1,9 +1,9 @@
-
-import os, sys, traci, json, warnings, math
+import os, sys, traci, json, math
 from functools import reduce
 from tqdm import tqdm
 from random import randint
 from copy import copy
+from warnings import warn
 import matplotlib.pyplot as plt
 
 class Simulation:
@@ -24,6 +24,7 @@ class Simulation:
         self.step_length = 0.5
 
         self.get_individual_vehicle_data = True
+        self.all_curr_vehicle_ids = []
         self.known_vehicles = {}
         self.light_changes = 0
 
@@ -80,12 +81,12 @@ class Simulation:
         traci.close()
         self.running = False
 
-    def step_to(self, end_step = None, n_steps = None, sim_dur = None, n_light_changes = None, detector_list = None, prev_data = None, vTypes = None, cumulative_data = False) -> dict:
+    def step_through(self, n_steps = 1, end_step = None, sim_dur = None, n_light_changes = None, detector_list = None, prev_data = None, vTypes = None, cumulative_data = False) -> dict:
         """
         Step through simulation from the current time until end_step, aggregating
         data during this period.
-        :param end_step:        End point for stepping through simulation
-        :param n_steps:         Perform n steps of the simulation (given instead of end_steps)
+        :param n_steps:         Perform n steps of the simulation (defaults to 1)
+        :param end_step:        End point for stepping through simulation (given instead of end_step)
         :param sim_dur:         Simulation duration
         :param n_light_changes: Run for n light changes (across all junctions)
         :param detector_list:   List of detector IDs to collect data from (defaults to all)
@@ -101,7 +102,7 @@ class Simulation:
         if end_step == None and n_steps != None: end_step = self.curr_step + n_steps
         elif end_step == None and sim_dur != None: end_step = self.curr_step + (sim_dur / self.step_length)
         elif end_step == None and n_light_changes != None: end_step, init_changes = math.inf, self.light_changes
-        elif end_step == None: raise ValueError("No time value given for step_to() function.")
+        elif end_step == None: raise ValueError("No time value given for step_through() function.")
 
         if prev_data == None:
             prev_steps, all_data = 0, {"data": {"detector": {}, "vehicle": {}, "all_vehicles": []}, "step_len": self.step_length, "start": start_time}
@@ -163,6 +164,8 @@ class Simulation:
         time_diff = traci.simulation.getTime() - self.time_val
         self.time_val = traci.simulation.getTime()
 
+        self.all_curr_vehicle_ids = list(traci.vehicle.getIDList())
+
         if self.junc_phases != None:
             update_junc_lights = []
             for junction_id, phases in self.junc_phases.items():
@@ -189,7 +192,7 @@ class Simulation:
                 data["detector"][detector_id]["veh_counts"] = traci.inductionloop.getLastStepVehicleNumber(detector_id)
                 data["detector"][detector_id]["occupancies"] = traci.inductionloop.getLastStepOccupancy(detector_id)
             else:
-                print("Warning: Unknown detector type '"+self.available_detectors[detector_id]+"'")
+                warn("Warning: Unknown detector type '"+self.available_detectors[detector_id]+"'")
 
         total_v_data, all_v_data = self.get_all_vehicle_data(types=vTypes)
         data["vehicle"]["no_vehicles"] = total_v_data["no_vehicles"]
@@ -266,6 +269,13 @@ class Simulation:
                 new_phase = "".join([new_phase[i] if new_phase[i] != '-' else curr_setting[i] for i in range(len(new_phase))])
             traci.trafficlight.setRedYellowGreenState(junction_id, new_phase)
 
+    def vehicle_exists(self, vehicle_id):
+        """
+        Tests if vehicle exists in the network
+        :return bool: True if ID in list of current vehicle IDs 
+        """
+        return vehicle_id in self.all_curr_vehicle_ids
+
     def get_last_step_vehicles(self, detector_ids = None) -> dict:
         """
         Get the IDs of vehicles that passed over the specified detectors
@@ -287,7 +297,7 @@ class Simulation:
             elif detector_type == "multientryexit":
                 vehicle_ids[detector_id] = list(traci.multientryexit.getLastStepVehicleIDs(detector_id))
             else:
-                print("Warning: Unknown detector type '"+detector_type+"'")
+                warn("Warning: Unknown detector type '"+detector_type+"'")
 
         return vehicle_ids
     
@@ -296,8 +306,10 @@ class Simulation:
         Get data for specified vehicle, updating known_vehicles dict
         :param vehicle_id: vehicle ID
         :param vehicle_type: Vehicle type if known
-        :return dict: Vehicle data dictionary
+        :return dict: Vehicle data dictionary, returns None if does not exist in simulation
         """
+
+        if vehicle_id not in self.all_curr_vehicle_ids: return None
 
         if vehicle_type == None:
             if "cbikes" in vehicle_id: vehicle_type = "cbikes"
@@ -306,23 +318,26 @@ class Simulation:
 
         speed = traci.vehicle.getSpeed(vehicle_id)
         lon, lat, alt = traci.vehicle.getPosition3D(vehicle_id)
+        heading, ts = traci.vehicle.getAngle(vehicle_id), traci.vehicle.getDeparture(vehicle_id)
 
         if vehicle_id not in self.known_vehicles.keys():
-            self.known_vehicles[vehicle_id] = {"type": vehicle_type,
+            self.known_vehicles[vehicle_id] = {"type":      vehicle_type,
                                                "longitude": lon,
-                                               "latitude": lat,
-                                               "speed": speed,
-                                               "length": traci.vehicle.getLength(vehicle_id),
-                                               "heading": traci.vehicle.getAngle(vehicle_id),
-                                               "ts": traci.vehicle.getDeparture(vehicle_id),
-                                               "altitude": alt,
+                                               "latitude":  lat,
+                                               "speed":     speed,
+                                               "length":    traci.vehicle.getLength(vehicle_id),
+                                               "heading":   heading,
+                                               "ts":        ts,
+                                               "altitude":  alt,
                                                "last_seen": self.curr_step
                                               }
         else:
-            self.known_vehicles[vehicle_id]["speed"] = speed
+            self.known_vehicles[vehicle_id]["speed"]     = speed
             self.known_vehicles[vehicle_id]["longitude"] = lon
-            self.known_vehicles[vehicle_id]["latitude"] = lat
-            self.known_vehicles[vehicle_id]["altitude"] = alt
+            self.known_vehicles[vehicle_id]["latitude"]  = lat
+            self.known_vehicles[vehicle_id]["heading"]   = heading
+            self.known_vehicles[vehicle_id]["ts"]        = ts
+            self.known_vehicles[vehicle_id]["altitude"]  = alt
             self.known_vehicles[vehicle_id]["last_seen"] = self.curr_step
 
         vehicle_data = copy(self.known_vehicles[vehicle_id])
@@ -330,22 +345,20 @@ class Simulation:
 
         return vehicle_data
 
-    def get_all_vehicle_data(self, ids = None, types = None, type_from_id = True) -> dict:
+    def get_all_vehicle_data(self, types = None, type_from_id = True) -> dict:
         """
         Collects vehicle data from SUMO, by id and/or type (defaults to all vehicles)
-        :param ids: IDs of vehicles to fetch
         :param types: Type(s) of vehicles to fetch
         :return dict: Vehicle data by id
         """
-        if ids == None: ids = list(traci.vehicle.getIDList())
 
         all_vehicle_data = {}
         total_vehicle_data = {"no_vehicles": 0, "no_waiting": 0}
 
-        for vehicle_id in ids:
+        for vehicle_id in self.all_curr_vehicle_ids:
 
             # Saving known vehicles reduces calls to traci by not
-            # fetching already known data
+            # fetching already known (& unchanging!) data
             if vehicle_id in self.known_vehicles.keys(): vehicle_type = self.known_vehicles[vehicle_id]["type"]
             else:
                 vehicle_type = traci.vehicle.getVehicleClass(vehicle_id)
