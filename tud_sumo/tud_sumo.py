@@ -276,28 +276,32 @@ class Simulation:
         """
         return vehicle_id in self.all_curr_vehicle_ids
 
-    def get_last_step_vehicles(self, detector_ids = None) -> dict:
+    def get_last_step_vehicles(self, detector_ids = None, flatten = False) -> dict:
         """
         Get the IDs of vehicles that passed over the specified detectors
         :param detector_ids: detector ID or list of detector IDs (defaults to all)
-        :return dict: Dict containing vehicle IDs for each detector
+        :param flatten: If true, all IDs are returned in a 1D array, else a dict with vehicles for each detector
+        :return dict|list: Dict or list containing all vehicle IDs
         """
 
         detector_ids = list(self.available_detectors.keys()) if detector_ids == None else detector_ids
         detector_ids = [detector_ids] if not isinstance(detector_ids, list) else detector_ids
 
-        vehicle_ids = {}
+        vehicle_ids = [] if flatten else {}
         for detector_id in detector_ids:
             
             if detector_id not in self.available_detectors.keys(): raise KeyError("KeyError: Unknown detector_id '"+detector_id+"'")
             detector_type = self.available_detectors[detector_id]
 
             if detector_type == "inductionloop":
-                vehicle_ids[detector_id] = list(traci.inductionloop.getLastStepVehicleIDs(detector_id))
+                detected_vehicles = list(traci.inductionloop.getLastStepVehicleIDs(detector_id))
             elif detector_type == "multientryexit":
-                vehicle_ids[detector_id] = list(traci.multientryexit.getLastStepVehicleIDs(detector_id))
+                detected_vehicles = list(traci.multientryexit.getLastStepVehicleIDs(detector_id))
             else:
                 warn("Warning: Unknown detector type '"+detector_type+"'")
+
+            if flatten: vehicle_ids += detected_vehicles
+            else: vehicle_ids[detector_id] = detected_vehicles
 
         return vehicle_ids
     
@@ -309,12 +313,7 @@ class Simulation:
         :return dict: Vehicle data dictionary, returns None if does not exist in simulation
         """
 
-        if vehicle_id not in self.all_curr_vehicle_ids: return None
-
-        if vehicle_type == None:
-            if "cbikes" in vehicle_id: vehicle_type = "cbikes"
-            elif "bikes" in vehicle_id: vehicle_type = "bikes"
-            else: vehicle_type = "cars"
+        if vehicle_id not in self.all_curr_vehicle_ids: raise KeyError("Vehicle '{0}' does not exist.".format(vehicle_id))
 
         speed = traci.vehicle.getSpeed(vehicle_id)
         lon, lat, alt = traci.vehicle.getPosition3D(vehicle_id)
@@ -373,6 +372,17 @@ class Simulation:
                 if vehicle_data["speed"] < 0.1: total_vehicle_data["no_waiting"] += 1
 
         return total_vehicle_data, all_vehicle_data
+    
+    def get_vehicle_route(self, vehicle_id, get_edges = True):
+        """
+        Returns vehicle route, either route ID or array of edges.
+        :param vehicle_id: Vehicle ID
+        :param get_edges:  Denotes if to return list of edges or route ID
+        :return [str]|str: List of edges or route ID
+        """
+
+        if get_edges: return list(traci.vehicle.getRoute(vehicle_id))
+        else: return traci.vehicle.getRouteID(vehicle_id)
     
 def get_cumulative_arr(arr, start) -> list:
     for i in range(start, len(arr)):

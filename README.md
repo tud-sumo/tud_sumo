@@ -8,12 +8,9 @@ Required packages are: `tqdm`, `matplotlib` and `traci`.
 
 ## Updates
 
-This is version '1.2.1', with the changelog:
-  - `sim.step_to()` is changed to `sim.step_through()` to better reflect usage
-  - Added `sim.vehicle_exists()` function
-  - `sim.all_curr_vehicle_ids` list
-  - Fixed heading and ts not updating in `sim.known_vehicles`
-  - Improved documentation
+This is version '1.2.2', with the changelog:
+  - Added `sim.get_vehicle_route()`
+  - Added `flatten` option to `sim.get_last_step_vehicles()`
 
 Check changes and previous versions through the project's [GitHub repository](https://github.com/calluume/tud_sumo).
 
