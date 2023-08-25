@@ -1,7 +1,7 @@
 import json, matplotlib.pyplot as plt, numpy as np
 import os.path
 from copy import deepcopy
-from simulation import Simulation
+from .simulation import Simulation
 
 class Plotter:
     def __init__(self, simulation):

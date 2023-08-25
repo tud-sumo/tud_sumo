@@ -10,7 +10,7 @@ Required packages are: `tqdm`, `matplotlib` and `traci`.
 
 ## Updates
 
-This is version '1.3.2'. The changelog is:
+This is version '1.3.4'. The changelog is:
   - Added scenario creation tools
   - Fixed lights sometimes not updating
   - Fixed error importing package
