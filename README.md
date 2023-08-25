@@ -1,3 +1,5 @@
+![Header - Delft](https://i.imgur.com/dYrHOPY.png)
+
 # TU Delft SUMO Wrapper
 
 Python SUMO wrapper, using traci, written for AIM Lab at TU Delft. Download with [pip](https://pypi.org/project/tud-sumo/) or from [GitHub](https://github.com/calluume/tud_sumo).
@@ -8,12 +10,9 @@ Required packages are: `tqdm`, `matplotlib` and `traci`.
 
 ## Updates
 
-This is version '1.3.0'. The changelog is:
-  - Added Junction tracking
-  - Added Plotter objects
-  - Added better SUMO vType handling
-  - `sim_data` is automatically appended and stored in the `Simulation` object, instead of using `prev_data`
-  - Removed default junctions
+This is version '1.3.1'. The changelog is:
+  - Added scenario creation tools
+  - Fixed lights sometimes not updating
 
 Check changes and previous versions through the project's [GitHub repository](https://github.com/calluume/tud_sumo).
 
@@ -94,3 +93,15 @@ plotter.plot_tl_colours('J0')
 ```
 
 Both `plotter.plot_junc_flows()` and `plotter.plot_tl_colours()` both require junction tracking during the simulation.
+
+## OSM Scenario Creator
+
+The `sim_from_osm()` function in `scenarios` allows you to create SUMO scenario files with data collected from OpenStreetMap. This is done using `query`, which can be set to:
+
+- A bounding box array (N, S, E, W coordinates), where everything within the box is queried.
+- An '.osm' file, exported directly from OpenStreetMap.
+- An Overpass API query (either as a string or path to txt file containing the query). https://overpass-turbo.eu/ is useful for generating Overpass API queries.
+
+Both `include_ped_infr` and `include_buildings` are flags denoting whether to include pedestrian/bike infrastructure and buildings respectively. `sumocfg_vals` is a dictionary containing configuration settings to append to the resulting '.sumocfg' file. `netconvert_args` is a list of arguments appended to the netconvert command used to convert the OSM data to SUMO files (more detail [here](https://sumo.dlr.de/docs/netconvert.html)).
+
+`add_sim_demand` can be used to later create a demand file for the scenario from an OD matrix. All data is appended to the routes file, so this can be called multiple times to add demand that varies over time.

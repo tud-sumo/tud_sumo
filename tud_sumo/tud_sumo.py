@@ -1,7 +1,5 @@
 import os, sys, traci, json, math
-from functools import reduce
 from tqdm import tqdm
-from random import randint
 from copy import copy
 from warnings import warn
 
@@ -305,6 +303,8 @@ class Simulation:
 
             junc_phase["curr_time"] = sum(junc_phase["times"][:junc_phase["curr_phase"]])
             junc_phase["cycle_len"] = sum(junc_phase["times"])
+
+        self.update_lights()
 
     def set_phase(self, junction, phase_no) -> None:
         """
