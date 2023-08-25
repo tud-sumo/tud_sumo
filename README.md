@@ -10,16 +10,17 @@ Required packages are: `tqdm`, `matplotlib` and `traci`.
 
 ## Updates
 
-This is version '1.3.1'. The changelog is:
+This is version '1.3.2'. The changelog is:
   - Added scenario creation tools
   - Fixed lights sometimes not updating
+  - Fixed error importing package
 
 Check changes and previous versions through the project's [GitHub repository](https://github.com/calluume/tud_sumo).
 
 ## Simulation Class
 
 ```python    
-from tud_sumo import tud_sumo
+from tud_sumo.simulation import Simulation
 
 sim = tud_sumo.Simulation(all_vtypes=list_of_vehicle_types)
 sim.start("files/scenario.sumocfg", gui=True)
@@ -84,6 +85,8 @@ sim.start_junc_tracking(junc_params)
 The `Plotter` class is used to visualise the simulation data. Initialise the `Plotter` object with either the current `Simulation` object, `sim_data` dictionary or the filepath to a previously saved `sim_data` file.
 
 ```python
+
+from tud_sumo.plot import Plotter
 plotter = Plotter(sim)
 
 plotter.plot_vehicle_data("vehicle")
@@ -105,3 +108,9 @@ The `sim_from_osm()` function in `scenarios` allows you to create SUMO scenario 
 Both `include_ped_infr` and `include_buildings` are flags denoting whether to include pedestrian/bike infrastructure and buildings respectively. `sumocfg_vals` is a dictionary containing configuration settings to append to the resulting '.sumocfg' file. `netconvert_args` is a list of arguments appended to the netconvert command used to convert the OSM data to SUMO files (more detail [here](https://sumo.dlr.de/docs/netconvert.html)).
 
 `add_sim_demand` can be used to later create a demand file for the scenario from an OD matrix. All data is appended to the routes file, so this can be called multiple times to add demand that varies over time.
+
+These are imported using:
+
+```python
+from tud.scenarios import sim_from_osm, add_sim_demand
+```

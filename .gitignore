@@ -4,6 +4,6 @@ tud_sumo/scenarios/*
 tud_sumo.egg-info/*
 pyproject.toml
 setup.py
-instructions.webloc
+instructions.txt
 *.pyc
 *.pyo

@@ -1,5 +1,4 @@
 import os, requests, csv, xml.etree.ElementTree as ET
-from tud_sumo import Simulation
 
 tu_delft_bbox = (52.004668, 51.991784, 4.383724, 4.365496)
 all_delft_bbox = (52.024396, 51.981332, 4.398933, 4.305552)
