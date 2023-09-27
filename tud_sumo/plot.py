@@ -1,7 +1,7 @@
 import json, matplotlib.pyplot as plt, numpy as np
 import os.path
 from copy import deepcopy
-from .simulation import Simulation
+from simulation import Simulation
 
 class Plotter:
     def __init__(self, simulation):
@@ -19,11 +19,11 @@ class Plotter:
             if os.path.exists(simulation):
                 with open(simulation, "r") as fp:
                     self.sim_data = json.load(fp)
-            else: raise FileNotFoundError("Plotter.init: simulation file '{0}' not found".format(simulation))
+            else: raise FileNotFoundError("Plot.init: simulation file '{0}' not found".format(simulation))
 
         elif isinstance(simulation, dict): self.sim_data = simulation
 
-        else: raise TypeError("Plotter.init: Invalid simulation type (must be Simulation|str|dict, not '{0}')".format(type(simulation).__name__))
+        else: raise TypeError("Plot.init: Invalid simulation type (must be Simulation|str|dict, not '{0}')".format(type(simulation).__name__))
 
     def plot_junc_flows(self, junc_id, vtypes=None, plot_n_vehicles=False, plot_all=True, save_fig=None):
         """
@@ -38,10 +38,10 @@ class Plotter:
         if self.simulation != None:
 
             if junc_id in self.simulation.tracked_juncs.keys(): tl = self.simulation.tracked_juncs[junc_id]
-            else: raise KeyError("Plotter.plot_junc_flows: Junction '{0}' not found in tracked junctions".format(junc_id))
+            else: raise KeyError("Plot.plot_junc_flows: Junction '{0}' not found in tracked junctions".format(junc_id))
 
             if tl.track_flow: junc_flows = deepcopy(tl.get_curr_data()["flows"])
-            else: raise ValueError("Plotter.plot_junc_flows: No traffic light at junction '{0}'".format(junc_id))
+            else: raise ValueError("Plot.plot_junc_flows: No traffic light at junction '{0}'".format(junc_id))
 
             start_time, end_time = tl.init_time, tl.curr_time
             sim_step_len = self.simulation.step_length
@@ -52,8 +52,8 @@ class Plotter:
                 start_time, end_time = self.sim_data["data"]["junctions"][junc_id]["init_time"], self.sim_data["data"]["junctions"][junc_id]["curr_time"]
                 sim_step_len = self.sim_data["step_len"]
 
-            else: raise ValueError("Plotter.plot_junc_flows: Junction '{0}' does not track flows (no detectors)".format(junc_id))
-        else: raise KeyError("Plotter.plot_junc_flows: Junction '{0}' not found in tracked junctions".format(junc_id))
+            else: raise ValueError("Plot.plot_junc_flows: Junction '{0}' does not track flows (no detectors)".format(junc_id))
+        else: raise KeyError("Plot.plot_junc_flows: Junction '{0}' not found in tracked junctions".format(junc_id))
 
         if vtypes == None: vtypes = list(junc_flows["avg_inflows"].keys())
         if "all" in vtypes and not plot_all: vtypes.remove("all")
@@ -106,10 +106,10 @@ class Plotter:
         if self.simulation != None:
 
             if tl_id in self.simulation.tracked_juncs.keys(): tl = self.simulation.tracked_juncs[tl_id]
-            else: raise KeyError("Plotter.plot_tl_colours: Junction '{0}' not found in tracked junctions".format(tl_id))
+            else: raise KeyError("Plot.plot_tl_colours: Junction '{0}' not found in tracked junctions".format(tl_id))
 
             if tl.has_tl: tl_durs = deepcopy(tl.durations)
-            else: raise ValueError("Plotter.plot_tl_colours: No traffic light at junction '{0}'".format(tl_id))
+            else: raise ValueError("Plot.plot_tl_colours: No traffic light at junction '{0}'".format(tl_id))
 
             m_len = tl.m_len
             init_time = tl.init_time
@@ -119,13 +119,13 @@ class Plotter:
                 tl_durs = deepcopy(self.sim_data["data"]["junctions"][tl_id]["tl"]["m_phases"])
                 m_len, init_time = self.sim_data["data"]["junctions"][tl_id]["tl"]["m_len"], self.sim_data["data"]["junctions"][tl_id]["init_time"]
 
-            else: raise ValueError("Plotter.plot_tl_colours: No traffic light at junction '{0}'".format(tl_id))
-        else: raise KeyError("Plotter.plot_tl_colours: Junction '{0}' not found in tracked junctions".format(tl_id))
+            else: raise ValueError("Plot.plot_tl_colours: No traffic light at junction '{0}'".format(tl_id))
+        else: raise KeyError("Plot.plot_tl_colours: Junction '{0}' not found in tracked junctions".format(tl_id))
 
         
         if (isinstance(time_range, list) or isinstance(time_range, tuple)) and time_range != None:
-            if len(time_range) != 2: raise ValueError("Plotter.plot_tl_colours: Invalid time range (must have length 2, not {0})".format(len(time_range)))
-            elif time_range[0] >= time_range[1]: raise ValueError("Plotter.plot_tl_colours: Invalid time range (start_time ({0}) >= end_time ({1}))".format(start_time, end_time))
+            if len(time_range) != 2: raise ValueError("Plot.plot_tl_colours: Invalid time range (must have length 2, not {0})".format(len(time_range)))
+            elif time_range[0] >= time_range[1]: raise ValueError("Plot.plot_tl_colours: Invalid time range (start_time ({0}) >= end_time ({1}))".format(start_time, end_time))
             else:
                 clipped_tl_durs = []
                 start_time, end_time = time_range[0], time_range[1]
@@ -133,7 +133,7 @@ class Plotter:
                     phase_times, phase_colours = [c_dur for (_, c_dur) in m], [colour for (colour, _) in m]
                     cum_phase_times = list(np.cumsum(phase_times))
                     if start_time < 0 or end_time > cum_phase_times[-1]:
-                        raise ValueError("Plotter.plot_tl_colours: Invalid time range (values [{0}-{1}] must be in range [0-{2}])".format(start_time, end_time, cum_phase_times[-1]))
+                        raise ValueError("Plot.plot_tl_colours: Invalid time range (values [{0}-{1}] must be in range [0-{2}])".format(start_time, end_time, cum_phase_times[-1]))
 
                     times_in_range = [time >= start_time and time <= end_time for time in cum_phase_times]
                     
@@ -224,16 +224,16 @@ class Plotter:
 
         if isinstance(dataset, str): # Sim data
             if dataset in self.sim_data["data"].keys(): data = self.sim_data["data"][dataset]
-            else: raise KeyError("Plotter.plot_vehicle_data: Unrecognised dataset key '{0}'".format(dataset))
+            else: raise KeyError("Plot.plot_vehicle_data: Unrecognised dataset key '{0}'".format(dataset))
             title = dataset.title() + " Data"
         elif isinstance(dataset, list) or isinstance(dataset, tuple): # Detector data
             data = self.sim_data["data"]
             for key in dataset:
                 if key in data.keys(): data = data[key]
-                else: raise KeyError("Plotter.plot_vehicle_data: Unrecognised dataset key '{0}'".format(dataset[-1]))
+                else: raise KeyError("Plot.plot_vehicle_data: Unrecognised dataset key '{0}'".format(dataset[-1]))
             title = ': '.join(dataset)
 
-        else: raise TypeError("Plotter.plot_vehicle_data: Invalid dataset key type (must be [int|str], not '{0}')".format(type(dataset).__name__))
+        else: raise TypeError("Plot.plot_vehicle_data: Invalid dataset key type (must be [int|str], not '{0}')".format(type(dataset).__name__))
 
         plot_data = {key: data[key] for key in data if key in default_labels and len(data[key]) != 0}
         fig, axes = plt.subplots(len(plot_data))

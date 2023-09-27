@@ -8,7 +8,7 @@ m25_bbox = (51.737469, 51.253273, 0.354171, -0.570450)
 rotterdam_ring = (51.970420, 51.850273, 4.588479, 4.332092)
 bordeaux = (44.835009, 44.831368, -0.596215, -0.603005)
 
-def sim_from_osm(scenario_name, useragent, query, road_level=-1, include_ped_infr=False, include_buildings=False, sumocfg_vals=None, netconvert_args=None, overwrite_files=True, remove_osm=True) -> str:
+def sim_from_osm(scenario_name, useragent, query, road_level=-1, include_ped_infr=False, include_buildings=False, sumocfg_vals=None, netconvert_args=None, scenarios_location='scenarios/', overwrite_files=True, remove_osm=True) -> str:
     """
     Creates a .net.xml and .sumocfg file from OSM data.
     :param scenario_name:     Scenario name (ID)
@@ -71,20 +71,20 @@ def sim_from_osm(scenario_name, useragent, query, road_level=-1, include_ped_inf
             query_str += """;(._;>;);out;"""
 
             bbox = True
-        else: raise TypeError("sim_from_osm: Invalid query (must be [str (query|filepath) | list (bbox)], not '"+type(query).__name__+"')")
+        else: raise TypeError("Scen.sim_from_osm: Invalid query (must be [str (query|filepath) | list (bbox)], not '"+type(query).__name__+"')")
 
         data = { 'data': query_str }
         response = requests.post('https://overpass-api.de/api/interpreter', headers=headers, data=data)
 
-    if not os.path.isdir('scenarios'): os.makedirs('scenarios')
-    if not os.path.isdir('scenarios/'+scenario_name): os.makedirs('scenarios/'+scenario_name)
+    if not os.path.isdir(scenarios_location): os.makedirs(scenarios_location)
+    if not os.path.isdir(scenarios_location+scenario_name): os.makedirs(scenarios_location+scenario_name)
     else:
-        if not overwrite_files: raise FileExistsError("sim_from_osm: Scenario file '{0}' already exists and cannot be overwritten.".format(scenario_name))
+        if not overwrite_files: raise FileExistsError("Scen.sim_from_osm: Scenario file '{0}' already exists and cannot be overwritten.".format(scenario_name))
 
-    sumocfg_file = 'scenarios/'+scenario_name+'/'+scenario_name+'.sumocfg'
-    osm_file = 'scenarios/'+scenario_name+'/'+scenario_name+'.osm'
-    net_file = 'scenarios/'+scenario_name+'/'+scenario_name+'.net.xml'
-    building_file = 'scenarios/'+scenario_name+'/buildings.poi.xml'
+    sumocfg_file = scenarios_location+scenario_name+'/'+scenario_name+'.sumocfg'
+    osm_file = scenarios_location+scenario_name+'/'+scenario_name+'.osm'
+    net_file = scenarios_location+scenario_name+'/'+scenario_name+'.net.xml'
+    building_file = scenarios_location+scenario_name+'/buildings.poi.xml'
 
     with open(osm_file, 'w') as f:
         f.write(response.text)
@@ -94,20 +94,20 @@ def sim_from_osm(scenario_name, useragent, query, road_level=-1, include_ped_inf
         data = { 'data': query_str }
         response = requests.post('https://overpass-api.de/api/interpreter', headers=headers, data=data)
 
-        building_file = 'scenarios/'+scenario_name+'/buildings.osm'
+        building_file = scenarios_location+scenario_name+'/buildings.osm'
         with open(building_file, 'w') as f:
             f.write(response.text)
 
-        os.system("polyconvert --osm-files {0} -o scenarios/{1}/buildings.poi.xml".format(building_file, scenario_name))
+        os.system("polyconvert --osm-files {0} -o {1}{2}/buildings.poi.xml".format(building_file, scenarios_location, scenario_name))
 
     if netconvert_args == None: netconvert_args = []
-    if os.path.exists(building_file): netconvert_args += ["--polygon-files", "scenarios/"+scenario_name+"/buildings.poi.xml"]
+    if os.path.exists(building_file): netconvert_args += ["--polygon-files", scenarios_location+scenario_name+"/buildings.poi.xml"]
 
     netconvert_cmd = "netconvert --osm-files {0} --output-file {1}".format(osm_file, net_file, ''.join(netconvert_args))
     os.system(netconvert_cmd)
 
     inputs = ['        <net-file value="{0}"/>\n'.format(net_file.split('/')[-1])]
-    if include_buildings and os.path.exists('scenarios/'+scenario_name+'/buildings.poi.xml'):
+    if include_buildings and os.path.exists(scenarios_location+scenario_name+'/buildings.poi.xml'):
         inputs.append('        <additional-files value="buildings.poi.xml"/>\n')
 
     sumocfg = ['<?xml version="1.0" encoding="UTF-8"?>\n\n','<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">\n\n', '    <input>\n']
@@ -127,7 +127,7 @@ def sim_from_osm(scenario_name, useragent, query, road_level=-1, include_ped_inf
 
     return sumocfg_file
 
-def add_sim_demand(scenario_name, od_file, start_time, end_time, vtype_id='cars', vtype_params={}):
+def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, vtype_id='cars', vtype_params={}, flow_key="flow", scenarios_location='scenarios/', od_delimiter=',', overwrite_rou=True):
     """
     Create simulation routes file and link to scenario '.sumocfg'. All demand/vtype data is appended to existing route files.
     :param scenario_name: Pre-existing scenario ID
@@ -139,13 +139,13 @@ def add_sim_demand(scenario_name, od_file, start_time, end_time, vtype_id='cars'
     """
 
     if 'cars' not in vtype_params.keys(): vtype_params['cars'] = {'color': 'red'}
-    if 'bikes' not in vtype_params.keys(): vtype_params['cars'] = {'length': '1.60', 'minGap': '0.5', 'vClass': 'bicycle', 'color': 'green'}
+    if 'bikes' not in vtype_params.keys(): vtype_params['bikes'] = {'length': '1.60', 'minGap': '0.5', 'vClass': 'bicycle', 'color': 'green'}
     
-    if not isinstance(od_file, str) or not od_file.endswith('.csv'): raise ValueError("add_sim_demand: Invalid OD filename '{0}'".format(od_file))
-    elif not os.path.exists(od_file): raise FileNotFoundError("add_sim_demand: OD file '{0}' does not exist.".format(od_file))
+    if not isinstance(od_file, str) or not od_file.endswith('.csv'): raise ValueError("Scen.add_sim_demand: Invalid OD filename '{0}'".format(od_file))
+    elif not os.path.exists(od_file): raise FileNotFoundError("Scen.add_sim_demand: OD file '{0}' does not exist.".format(od_file))
 
-    demand_file = 'scenarios/'+scenario_name+'/'+scenario_name+'.rou.xml'
-    if not os.path.exists(demand_file):
+    demand_file = scenarios_location+scenario_name+'/'+scenario_name+'.rou.xml'
+    if not os.path.exists(demand_file) or overwrite_rou:
         demand = ['<?xml version="1.0" encoding="UTF-8"?>\n\n<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">\n\n</routes>']
         with open(demand_file, 'w') as f:
             f.writelines(demand)
@@ -168,7 +168,7 @@ def add_sim_demand(scenario_name, od_file, start_time, end_time, vtype_id='cars'
         root.append(vtype)
 
     with open(od_file, 'r') as f:
-        od_reader = csv.reader(f)
+        od_reader = csv.reader(f, delimiter=od_delimiter)
 
         locs = None
         flow_ids = [int(f_vtype.attrib['id'].split('_')[-1]) for f_vtype in root.iter('flow')]
@@ -176,25 +176,32 @@ def add_sim_demand(scenario_name, od_file, start_time, end_time, vtype_id='cars'
         for row in od_reader:
             if locs == None:
                 locs = row[1:]
+                if start_time == None and end_time == None:
+                    t_str = row[0]
+                    params = t_str.split(' ')
+                    for elem in params:
+                        if elem.startswith('s='): start_time = float(elem[2:])
+                        elif elem.startswith('e='): end_time = float(elem[2:])
             else:
                 a = row[0]
                 for i, b in enumerate(locs):
-                    flow = ET.Element('flow')
-                    flow.set('id', 'flow_'+str(flow_id))
-                    flow.set('type', vtype_id)
-                    flow.set('begin', str(float(start_time)))
-                    flow.set('from', str(a))
-                    flow.set('to', str(b))
-                    flow.set('end', str(float(end_time)))
-                    flow.set('number', row[1 + i])
-                    flow_id += 1
+                    if int(row[1 + i]) != 0 and a != b:
+                        flow = ET.Element('flow')
+                        flow.set('id', flow_key+'_'+str(flow_id))
+                        flow.set('type', vtype_id)
+                        flow.set('begin', str(float(start_time)))
+                        flow.set('from', str(a))
+                        flow.set('to', str(b))
+                        flow.set('end', str(float(end_time)))
+                        flow.set('number', row[1 + i])
+                        flow_id += 1
 
-                    root.append(flow)
+                        root.append(flow)
 
     ET.indent(demand_tree, space="    ")
     demand_tree.write(demand_file)
 
-    sumocfg_tree = ET.parse('scenarios/'+scenario_name+'/'+scenario_name+'.sumocfg')
+    sumocfg_tree = ET.parse(scenarios_location+scenario_name+'/'+scenario_name+'.sumocfg')
     root = sumocfg_tree.getroot()
     for input_elem in root.iter('input'):
         if 'route-files' not in [elem.tag for elem in input_elem.iter()]:
@@ -203,18 +210,4 @@ def add_sim_demand(scenario_name, od_file, start_time, end_time, vtype_id='cars'
             input_elem.append(route_file)
 
             ET.indent(sumocfg_tree, space="    ")
-            sumocfg_tree.write('scenarios/'+scenario_name+'/'+scenario_name+'.sumocfg')
-
-if __name__ == "__main__":
-
-    netconvert_args =  ["--roundabouts.guess", "--ramps.guess", "--tls.guess-signals", "--tls.discard-simple", "--tls.join"]
-
-    cfg_file = sim_from_osm('delft', "tud_sumo/c.evans@tudelft.nl", all_delft_bbox, include_buildings=True, include_ped_infr=True, sumocfg_vals={'step-length': 0.5, "lateral-resolution": 1.6}, netconvert_args=netconvert_args)
-
-    #add_sim_demand('exeter', 'od.csv', 0, 100, 'cars')
-    
-    sim = Simulation()
-
-    sim.start(cfg_file, gui=True)
-
-    sim_data = sim.step_through(1000)
+            sumocfg_tree.write(scenarios_location+scenario_name+'/'+scenario_name+'.sumocfg')

@@ -1,23 +1,39 @@
-![Header - Delft](https://i.imgur.com/dYrHOPY.png)
-
 # TU Delft SUMO Wrapper
 
-Python SUMO wrapper, using traci, written for AIM Lab at TU Delft. Download with [pip](https://pypi.org/project/tud-sumo/) or from [GitHub](https://github.com/calluume/tud_sumo).
+Python SUMO wrapper, using traci, written for the AIM Lab at TU Delft by Callum Evans. Install with [pip](https://pypi.org/project/tud-sumo/) or by downloading the most recent version from [GitHub](https://github.com/calluume/tud_sumo).
+
+![Header - Delft](https://i.imgur.com/dYrHOPY.png)
+
+## Updates
+
+This is version '1.4.0'. The changelog is:
+
+**New Features**
+  - Added `sim.set_tl_colour` to change light setting indefinitely.
+  - Added overwrite setting to `sim.set_phases` to allow for changing single junctions.
+  - Added `sim.set_tl_metering_rate` to set traffic light based on a metering flow value.
+  - Added vehicle command system with `sim.send_v_command`, for changing vehicle state.
+
+**Changes**
+  - Renamed `sim.set_phase` to `sim.change_phase` to avoid confusion.
+  - Allowed for setting the save location of scenario files.
+  - Changed the average inflow value of tracked junctions to a list of rolling averages, where the horizon (default 60s) can be changed using "avg_horizon" in the `junc_params` dictionary.
+  - Removed `verbose` setting.
+  - Progress bar is used automatically when stepping through multiple steps and `gui=False`.
+  - Errors and warning messages made more consistent.
+
+**Fixes**
+  - Fixed `get_individual_vehicle_data` setting & added toggle
+  
+Check changes and previous versions through the project's [GitHub repository](https://github.com/calluume/tud_sumo).
 
 ## Requirements 
 
 Required packages are: `tqdm`, `matplotlib` and `traci`.
 
-## Updates
+## Usage Examples
 
-This is version '1.3.4'. The changelog is:
-  - Added scenario creation tools
-  - Fixed lights sometimes not updating
-  - Fixed error importing package
-
-Check changes and previous versions through the project's [GitHub repository](https://github.com/calluume/tud_sumo).
-
-## Simulation Class
+### Simulation Class
 
 ```python    
 from tud_sumo.simulation import Simulation
@@ -26,7 +42,7 @@ sim = tud_sumo.Simulation(all_vtypes=list_of_vehicle_types)
 sim.start("files/scenario.sumocfg", gui=True)
 ```
 
-The phase dictionary is a dictionary containing the phases and times. `math.inf` will set a light permanently, and `'-'` will keep that movement on the same setting as the previous phase. `sim.set_phases()` will then start these settings within the simulation on the next time step. If no phase dictionary is given, the simulation will use the default SUMO logic.
+The phase dictionary is a dictionary containing the phases and times. `math.inf` will set a light permanently, and `'-'` will keep that movement on the same setting as the previous phase. `sim.set_phases()` will then start these settings within the simulation on the next time step. If no phase dictionary is given, the simulation will use the default SUMO logic. Set `overwrite=False` when only updating certain junction phases during runtime.
 
 ```python
 phase_dictionary = {'junctionID': {'phases': [ 'ggrryy', 'rryygg', 'yyggrr', 'rrrr--' ], # Phase light settings
@@ -37,7 +53,7 @@ sim.set_phases(phase_dictionary)
 
 Use `sim.step_through()` to run through the simulation, collecting and aggregating the simulation data. This will return a dictionary containing all aggregated data collected. This will contain all detector and vehicle information, although detectors and vehicle types can be specified using `detector_list` and `vTypes` respectively. Data from calls to `sim.step_through()` is automatically aggregated and appended together, although to collect data independent from other runs, set `append_data` to false. Note, this will reset the data stored in the `Simulation` object.
 
-To improve performance, set `sim.get_individual_vehicles = False` to not collect all individual vehicles' data at each time step when not needed.
+To improve performance, run `sim.toggle_vehicle_tracking()` to not collect all individual vehicles' data at each time step when not needed.
 
 The `example_data.json` file shows the output of the `step_through` function, which can also be saved as a JSON file using `sim.save_data()`.
 
@@ -66,7 +82,7 @@ sim.end()
 sim.save_data("simulation_data.json")
 ```
 
-## Junction Class
+### Junction Class
 
 It is now possible to track specific junctions and collect vehicle and traffic light data using the `Junction` class. This is started using the `sim.start_junc_tracking()` function. By default, all junctions with traffic lights are tracked, although a list of junction IDs can be given.
 
@@ -80,7 +96,7 @@ junc_params = {'junc_id': {
 sim.start_junc_tracking(junc_params)
 ```
 
-## Plotter Class
+### Plotter Class
 
 The `Plotter` class is used to visualise the simulation data. Initialise the `Plotter` object with either the current `Simulation` object, `sim_data` dictionary or the filepath to a previously saved `sim_data` file.
 
@@ -97,7 +113,7 @@ plotter.plot_tl_colours('J0')
 
 Both `plotter.plot_junc_flows()` and `plotter.plot_tl_colours()` both require junction tracking during the simulation.
 
-## OSM Scenario Creator
+### OSM Scenario Creator
 
 The `sim_from_osm()` function in `scenarios` allows you to create SUMO scenario files with data collected from OpenStreetMap. This is done using `query`, which can be set to:
 
@@ -107,10 +123,19 @@ The `sim_from_osm()` function in `scenarios` allows you to create SUMO scenario 
 
 Both `include_ped_infr` and `include_buildings` are flags denoting whether to include pedestrian/bike infrastructure and buildings respectively. `sumocfg_vals` is a dictionary containing configuration settings to append to the resulting '.sumocfg' file. `netconvert_args` is a list of arguments appended to the netconvert command used to convert the OSM data to SUMO files (more detail [here](https://sumo.dlr.de/docs/netconvert.html)).
 
-`add_sim_demand` can be used to later create a demand file for the scenario from an OD matrix. All data is appended to the routes file, so this can be called multiple times to add demand that varies over time.
+`add_sim_demand` can be used to later create a demand file for the scenario from an OD matrix. All data is appended to the routes file, so this can be called multiple times to add demand or surges that varies over time. An example OD file (in .csv form) is shown below, where the first cell can be used to define the start (s) and end (e) times as demonstrated. This can alternatively be done using the `add_sim_demand` parameters.
 
-These are imported using:
+| `s=0 e=100` | `road_1` | `road_2` |
+|:-----------:|:--------:|:--------:|
+|   `road_1`  |     0    |     50   |
+|   `road_2`  |     50   |     0    |
+
+Importing and usage examples are below:
 
 ```python
-from tud.scenarios import sim_from_osm, add_sim_demand
+from tud_sumo.scenarios import sim_from_osm, add_sim_demand
+
+sumocfg_file = sim_from_osm(scenario_name, "project/email", bbox)
+
+add_sim_demand(scenario_name, 'od_file.csv', od_delimiter=';')
 ```

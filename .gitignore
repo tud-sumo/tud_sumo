@@ -1,9 +1,7 @@
-files/*
 dist/*
-tud_sumo/scenarios/*
 tud_sumo.egg-info/*
 pyproject.toml
 setup.py
-instructions.txt
 *.pyc
 *.pyo
+dev/*
