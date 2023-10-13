@@ -1,35 +1,32 @@
 # TU Delft SUMO Wrapper
 
+<a href="https://github.com/calluume/tud_sumo" alt="GitHub">
+    <img src="https://img.shields.io/badge/v1.4.0-github?logo=github&labelColor=%236e5494&color=%23394049" /></a>
+
 Python SUMO wrapper, using traci, written for the AIM Lab at TU Delft by Callum Evans. Install with [pip](https://pypi.org/project/tud-sumo/) or by downloading the most recent version from [GitHub](https://github.com/calluume/tud_sumo).
 
 ![Header - Delft](https://i.imgur.com/dYrHOPY.png)
 
 ## Updates
 
-This is version '1.4.0'. The changelog is:
+This is version '1.5.0'. The changelog is:
 
-**New Features**
-  - Added `sim.set_tl_colour` to change light setting indefinitely.
-  - Added overwrite setting to `sim.set_phases` to allow for changing single junctions.
-  - Added `sim.set_tl_metering_rate` to set traffic light based on a metering flow value.
-  - Added vehicle command system with `sim.send_v_command`, for changing vehicle state.
-
-**Changes**
-  - Renamed `sim.set_phase` to `sim.change_phase` to avoid confusion.
-  - Allowed for setting the save location of scenario files.
-  - Changed the average inflow value of tracked junctions to a list of rolling averages, where the horizon (default 60s) can be changed using "avg_horizon" in the `junc_params` dictionary.
-  - Removed `verbose` setting.
-  - Progress bar is used automatically when stepping through multiple steps and `gui=False`.
-  - Errors and warning messages made more consistent.
-
-**Fixes**
-  - Fixed `get_individual_vehicle_data` setting & added toggle
+  - Added events and event scheduler.
+  - Added `plot_cumulative_curve` and `plot_n_vehicles` functions to Plotter.
+  - Added `get_last_step_detector_vehicles` and `get_last_step_geometry_vehicles` to Simulation.
+  - Added `get_geometry_vals` and `set_geometry_vals` functions to Simulation.
+  - Made `get_vehicle_vals` and `set_vehicle_vals` (previously `send_v_command`) consistent with each other.
+  - Detector data now includes vehicle IDs at each step (IDs may be in multiple steps).
+  - Junction parameters can now be read from a JSON file, like event dicts.
+  - Step length is now only read from SUMO options via TraCI, to fix where SUMO and simulation step lengths differed.
+  - Added units setting, either metric, imperial or UK.
+  - Vehicle type now always reflects SUMO type.
   
 Check changes and previous versions through the project's [GitHub repository](https://github.com/calluume/tud_sumo).
 
 ## Requirements 
 
-Required packages are: `tqdm`, `matplotlib` and `traci`.
+Python 3.10 or later is required. Dependencies are; `tqdm`, `matplotlib` and `traci`.
 
 ## Usage Examples
 
@@ -135,6 +132,7 @@ Importing and usage examples are below:
 ```python
 from tud_sumo.scenarios import sim_from_osm, add_sim_demand
 
+# 'project/email' string required to request OSM data
 sumocfg_file = sim_from_osm(scenario_name, "project/email", bbox)
 
 add_sim_demand(scenario_name, 'od_file.csv', od_delimiter=';')
