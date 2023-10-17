@@ -1,7 +1,7 @@
 # TU Delft SUMO Wrapper
 
 <a href="https://github.com/calluume/tud_sumo" alt="GitHub">
-    <img src="https://img.shields.io/badge/v1.4.0-github?logo=github&labelColor=%236e5494&color=%23394049" /></a>
+    <img src="https://img.shields.io/badge/v1.5.0-github?logo=github&labelColor=%236e5494&color=%23394049" /></a>
 
 Python SUMO wrapper, using traci, written for the AIM Lab at TU Delft by Callum Evans. Install with [pip](https://pypi.org/project/tud-sumo/) or by downloading the most recent version from [GitHub](https://github.com/calluume/tud_sumo).
 
@@ -9,18 +9,18 @@ Python SUMO wrapper, using traci, written for the AIM Lab at TU Delft by Callum 
 
 ## Updates
 
-This is version '1.5.0'. The changelog is:
+This is version '1.5.1'. The changelog is:
 
-  - Added events and event scheduler.
-  - Added `plot_cumulative_curve` and `plot_n_vehicles` functions to Plotter.
-  - Added `get_last_step_detector_vehicles` and `get_last_step_geometry_vehicles` to Simulation.
-  - Added `get_geometry_vals` and `set_geometry_vals` functions to Simulation.
-  - Made `get_vehicle_vals` and `set_vehicle_vals` (previously `send_v_command`) consistent with each other.
-  - Detector data now includes vehicle IDs at each step (IDs may be in multiple steps).
-  - Junction parameters can now be read from a JSON file, like event dicts.
-  - Step length is now only read from SUMO options via TraCI, to fix where SUMO and simulation step lengths differed.
-  - Added units setting, either metric, imperial or UK.
-  - Vehicle type now always reflects SUMO type.
+  - Added scenario name, used when saving data/plotting/running multiple scenarios.
+  - Added `get_last_step_detector_data` and `get_interval_detector_data` to get data from detectors.
+  - Added better meter handling (junctions can now be tracked as a meter, with rate, queue length and delay automatically tracked when using `set_tl_metering_rate`)
+  - Added `plot_metering_rate` and `plot_meter_queue_length` for plotting metering data, and `plot_cumulative_curve` to Plotter.
+  - Added `vehicle_is_stopped` to test whether vehicles are currently stopped.
+  - Removed `all_vtypes`, vtypes now only gotten from SUMO files.
+  - Removed `toggle_vehicle_tracking`, now uses `get_individual_vehicle_data` parameter in `Sim.start`.
+  - Error messages now show current step.
+  - Fixed underflow error with cumulative arrays. 
+  - Fixed issue of sim_data storing empty lists when not tracking individual vehicles.
   
 Check changes and previous versions through the project's [GitHub repository](https://github.com/calluume/tud_sumo).
 

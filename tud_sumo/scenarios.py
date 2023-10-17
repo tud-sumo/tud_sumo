@@ -127,13 +127,14 @@ def sim_from_osm(scenario_name, useragent, query, road_level=-1, include_ped_inf
 
     return sumocfg_file
 
-def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, vtype_id='cars', vtype_params={}, flow_key="flow", scenarios_location='scenarios/', od_delimiter=',', overwrite_rou=True):
+def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_vehicles=True, vtype_id='cars', vtype_params={}, flow_key="flow", flow_params={}, scenarios_location='scenarios/', od_delimiter=',', overwrite_rou=True):
     """
     Create simulation routes file and link to scenario '.sumocfg'. All demand/vtype data is appended to existing route files.
     :param scenario_name: Pre-existing scenario ID
     :param od_file:       Filepath to OD matrix (.csv)
     :param start_time:    Demand profile start time
     :param end_time:      Demand profile end time
+    :param num_vehicles:  Denotes whether to take OD values as total number of vehiclces or vehicles per hour
     :param vtype_id:      Demand profile vehicle type (added as vType if unknown)
     :param vtype_params:  vType parameters (default values for 'cars' and 'bikes' added)
     """
@@ -193,7 +194,10 @@ def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, vtype
                         flow.set('from', str(a))
                         flow.set('to', str(b))
                         flow.set('end', str(float(end_time)))
-                        flow.set('number', row[1 + i])
+                        if num_vehicles: flow.set('number', row[1 + i])
+                        else: flow.set('vehsPerHour', row[1 + i])
+                        for key, val in flow_params.items(): flow.set(key, val)
+
                         flow_id += 1
 
                         root.append(flow)
