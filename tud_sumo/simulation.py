@@ -1,8 +1,10 @@
-import os, sys, traci, json, math
+import os, sys, traci, sumolib, json, math
 from tqdm import tqdm
 from copy import copy, deepcopy
 from events import EventScheduler, Event
-from enum import Enum
+from controllers import VSLController, RGController
+from shapely.geometry import LineString, Point
+from utils import *
 
 class Simulation:
     def __init__(self, scenario_name: str|None = None) -> None:
@@ -28,18 +30,25 @@ class Simulation:
 
         self.all_edges = None
         self.all_lanes = None
+        self.all_routes = None
+
+        self.tracked_edge_ids = []
+        self.tracked_edges = {}
 
         self.available_detectors = {}
         self.step_length = None
 
         self.get_individual_vehicle_data = True
-        self.all_curr_vehicle_ids = []
+        self.all_curr_vehicle_ids = set([])
+        self.all_loaded_vehicle_ids = set([])
         self.known_vehicles = {}
         self.light_changes = 0
 
         self.all_data = None
 
         self.scheduler = None
+
+        self.controllers = {}
 
     def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, cmd_options: list|None = None, units: int = 1, get_individual_vehicle_data: bool = True, suppress_warnings: bool = False, ignore_TraCI_err: bool = False, gui: bool = False) -> None:
         """
@@ -59,13 +68,13 @@ class Simulation:
         self.gui = gui
         sumoCMD = ["sumo-gui"] if gui else ["sumo"]
 
-        if config_file == net_file == None: raise ValueError("(step {0}) Sim.start: Either config or network file required.".format(self.curr_step))
+        if config_file == net_file == None: raise ValueError("(step {0}) Simulation.start(): Either config or network file required.".format(self.curr_step))
         
         if config_file != None:
             if config_file.endswith(".sumocfg"):
                 sumoCMD += ["-c", config_file]
                 self.scenario_name = get_scenario_name(config_file)
-            else: raise ValueError("(step {0}) Sim.start: Invalid config file extension.".format(self.curr_step))
+            else: raise ValueError("(step {0}) Simulation.start(): Invalid config file extension.".format(self.curr_step))
         else:
             sumoCMD += ["-n", net_file]
             self.scenario_name = get_scenario_name(net_file)
@@ -85,11 +94,18 @@ class Simulation:
         if self.junc_phases != None: self.update_lights()
         self.time_val = traci.simulation.getTime()
 
-        self.available_detectors = {detector_id: 'multientryexit' for detector_id in list(traci.multientryexit.getIDList())}
-        self.available_detectors.update({detector_id: 'inductionloop' for detector_id in list(traci.inductionloop.getIDList())})
+        for detector_id in list(traci.multientryexit.getIDList()):
+            self.available_detectors[detector_id] = {'type': 'multientryexit', 'position': {'entry_lanes': traci.multientryexit.getEntryLanes(detector_id),
+                                                                                            'exit_lanes': traci.multientryexit.getExitLanes(detector_id),
+                                                                                            'entry_positions': traci.multientryexit.getEntryPositions(detector_id),
+                                                                                            'exit_positions': traci.multientryexit.getExitPositions(detector_id)}}
+            
+        for detector_id in list(traci.inductionloop.getIDList()):
+            self.available_detectors[detector_id] = {'type': 'inductionloop', 'position': {'lane_id': traci.inductionloop.getLaneID(detector_id), 'position': traci.inductionloop.getPosition(detector_id)}}
 
         self.all_edges = traci.edge.getIDList()
         self.all_lanes = traci.lane.getIDList()
+        self.all_routes = traci.route.getIDList()
 
         self.get_individual_vehicle_data = get_individual_vehicle_data
 
@@ -117,17 +133,18 @@ class Simulation:
                 junc_ids, junc_params = juncs, None
             elif isinstance(juncs, str):
                 junc_ids, junc_params = [juncs], None
-            else: raise TypeError("(step {0}) Sim.start_junc_tracking: Invalid junc_params (must be [str|list|dict], not '{1}').".format(self.curr_step, type(juncs).__name__))
+            else: raise TypeError("(step {0}) Simulation.start_junc_tracking(): Invalid junc_params (must be [str|list|dict], not '{1}').".format(self.curr_step, type(juncs).__name__))
 
             if len(set(all_juncs).intersection(set(junc_ids))) != len(junc_ids):
-                raise KeyError("(step {0}) Sim.start_junc_tracking: Junction ID not found.".format(self.curr_step))
+                raise KeyError("(step {0}) Simulation.start_junc_tracking(): Junction ID not found.".format(self.curr_step))
             else: track_list = junc_ids
 
         self.all_juncs, self.all_tls = all_juncs, all_tls
 
         for junc_id in track_list:
             junc_param = junc_params[junc_id] if junc_params != None else None
-            self.tracked_juncs[junc_id] = Junction(junc_id, self, junc_param)
+            self.tracked_juncs[junc_id] = TrackedJunction(junc_id, self, junc_param)
+            self.tracked_juncs[junc_id].update_vals = True
 
     def reset_data(self) -> None:
         """
@@ -136,6 +153,12 @@ class Simulation:
 
         for junction in self.tracked_juncs.values():
             junction.reset()
+
+        for edge in self.tracked_edges.values():
+            edge.reset()
+
+        for controller in self.controllers.values():
+            controller.reset()
 
         self.all_data = None
 
@@ -173,15 +196,22 @@ class Simulation:
         if not filename.endswith(".json"): filename += ".json"
 
         if os.path.exists(filename) and overwrite:
-            if not self.suppress_warnings: print("(step {0}) (WARNING) Sim.save_data: Simulation.save_data: File '{1}' already exists and will be overwritten".format(self.curr_step, filename))
+            if not self.suppress_warnings: print("(step {0}) (WARNING) Simulation.save_data(): Simulation.save_data: File '{1}' already exists and will be overwritten".format(self.curr_step, filename))
         elif os.path.exists(filename) and not overwrite:
-            raise FileExistsError("(step {0}) Sim.save_data: File '{1}' already exists and can't be overwritten.".format(self.curr_step, filename))
+            raise FileExistsError("(step {0}) Simulation.save_data(): File '{1}' already exists and can't be overwritten.".format(self.curr_step, filename))
 
         if self.all_data != None:
             if self.scheduler != None: self.all_data["data"]["events"] = self.scheduler.__dict__()
             with open(filename, "w") as fp:
                 json.dump(self.all_data, fp, indent=4)
-        else: raise AssertionError("(step {0}) Sim.save_data: No data to save as simulation has not been run.".format(self.curr_step))
+        else: raise AssertionError("(step {0}) Simulation.save_data(): No data to save as simulation has not been run.".format(self.curr_step))
+
+    def start_edge_tracking(self, edge_list):
+        self.tracked_edge_ids = edge_list
+        for edge_id in edge_list:
+            if self.geometry_exists(edge_id) == None:
+                raise KeyError("(step {0}) Simulation.start_edge_tracking(): Geometry ID '{1}' not found.".format(self.curr_step, edge_id))
+            self.tracked_edges[edge_id] = TrackedEdge(edge_id, self)
 
     def add_events(self, event_params: Event|list|dict|str) -> None:
         """
@@ -191,6 +221,33 @@ class Simulation:
         if self.scheduler == None:
             self.scheduler = EventScheduler(self)
         self.scheduler.add_events(event_params)
+
+    def add_controllers(self, controller_params: str|dict) -> dict:
+        """
+        Add controllers from parameters in a dictionary/JSON file.
+        :param controller_params: Controller parameters dictionary or filepath
+        """
+
+        controller_params = load_params(controller_params, "Simulation.add_controllers()", self.curr_step, "controller_params")
+
+        for c_id, c_params  in controller_params.items():
+            if isinstance(c_params, (RGController, VSLController)):
+                self.controllers[c_id] = c_params
+            elif isinstance(c_params, dict):
+                if 'type' not in c_params.keys(): raise KeyError("(step {0}) Simulation.add_controllers(): No type given (must be [1 (RG)|2 (VSL)]).".format(self.curr_step))
+                if c_params['type'] in [1, 2]:
+
+                    c_type = Controller(c_params['type'])
+                    match c_type.name:
+                        case 'RG': controller = RGController(c_id, c_params, self)
+                        case 'VSL': controller = VSLController(c_id, c_params, self)
+                    
+                    self.controllers[c_id] = controller
+
+                else: ValueError("(step {0}) Simulation.add_controllers(): Invalid controller type (must be [1 (RG)|2 (VSL)]).".format(self.curr_step))
+            else: raise TypeError("(step {0}) Simulation.add_controllers(): Invalid parameters type in dictionary (must be [dict|RGController|VSLController], not '{1}').".format(self.curr_step, type(c_params).__name__))
+
+        return self.controllers
 
     def step_through(self, n_steps: int = 1, end_step: int|None = None, sim_dur: int|None = None, n_light_changes: int|None = None, detector_list: list|None = None, vTypes: list|None = None, keep_data: bool = True, append_data: bool = True, cumulative_data: bool = False) -> dict:
         """
@@ -218,12 +275,16 @@ class Simulation:
         if end_step == None and n_steps != None: end_step = self.curr_step + n_steps
         elif end_step == None and sim_dur != None: end_step = self.curr_step + (sim_dur / self.step_length)
         elif end_step == None and n_light_changes != None: end_step, init_changes = math.inf, self.light_changes
-        elif end_step == None: raise ValueError("(step {0}) Sim.step_through: No time value given.".format(self.curr_step))
+        elif end_step == None: raise ValueError("(step {0}) Simulation.step_through(): No time value given.".format(self.curr_step))
 
         if prev_data == None:
-            prev_steps, all_data = 0, {"data": {"detector": {}, "junctions": {}, "vehicle": {}},
-                                       "step_len": self.step_length, "units": self.units.name, "start": start_time}
+            prev_steps, all_data = 0, {"data": {}, "scenario_name": self.scenario_name, "step_len": self.step_length, "units": self.units.name, "start": start_time}
             
+            if len(self.available_detectors) > 0: all_data["data"]["detector"] = {}
+            if self.track_juncs: all_data["data"]["junctions"] = {}
+            if len(self.tracked_edges) > 0: all_data["data"]["edges"] = {}
+            if len(self.controllers) > 0: all_data["data"]["controllers"] = {}
+            all_data["data"]["vehicle"] = {}
             if self.get_individual_vehicle_data: all_data["data"]["all_vehicles"] = []
             if self.scheduler != None: all_data["data"]["events"] = {}
         else: 
@@ -231,7 +292,7 @@ class Simulation:
                             [len(detector_data["speeds"]) for detector_data in prev_data["data"]["detector"].values()] +
                             [len(detector_data["veh_counts"]) for detector_data in prev_data["data"]["detector"].values()])
             
-            if len(prev_steps) != 1: raise ValueError("(step {0}) Sim.step_through: Invalid prev_data (different length arrays).".format(self.curr_step))
+            if len(prev_steps) != 1: raise ValueError("(step {0}) Simulation.step_through(): Invalid prev_data (different length arrays).".format(self.curr_step))
             else:
                 prev_steps = prev_steps.pop()
                 all_data = prev_data
@@ -243,20 +304,22 @@ class Simulation:
             except traci.exceptions.FatalTraCIError:
                 self.running = False
                 if self.ignore_TraCI_err:
-                    if not self.suppress_warnings: print("(step {0}) (WARNING) Sim.step_through: Fatal TraCI connection error occured and 'Sim.ignore_TraCI_err' is set to True.".format(self.curr_step))
+                    if not self.suppress_warnings: print("(step {0}) (WARNING) Simulation.step_through(): Fatal TraCI connection error occured and 'Sim.ignore_TraCI_err' is set to True.".format(self.curr_step))
                     break
-                else: raise traci.exceptions.FatalTraCIError("(step {0}) Sim.step_through: Fatal TraCI connection error occured.".format(self.curr_step))
+                else: raise traci.exceptions.FatalTraCIError("(step {0}) Simulation.step_through(): Fatal TraCI connection error occured.".format(self.curr_step))
 
             if self.get_individual_vehicle_data: all_data["data"]["all_vehicles"].append(all_v_data)
-            all_data["data"]["junctions"] = last_step_data["junctions"]
+            for controller in self.controllers.values(): controller.update()
+            for edge in self.tracked_edges.values(): edge.update()
 
             if len(all_data["data"]["detector"]) == 0:
                 for detector_id in detector_list:
-                    all_data["data"]["detector"][detector_id] = {"type": self.available_detectors[detector_id], "speeds": [], "veh_counts": [], "veh_ids": [], "occupancies": []}
+                    all_data["data"]["detector"][detector_id] = self.available_detectors[detector_id]
+                    all_data["data"]["detector"][detector_id].update({"speeds": [], "veh_counts": [], "veh_ids": [], "occupancies": []})
                 all_data["data"]["vehicle"] = {"no_vehicles": [], "tts": [], "delay": []}
 
             for detector_id in last_step_data["detector"].keys():
-                if detector_id not in all_data["data"]["detector"].keys(): raise KeyError("(step {0}) Sim.step_through: Unrecognised detector ID found ('{1}').".format(self.curr_step, detector_id))
+                if detector_id not in all_data["data"]["detector"].keys(): raise KeyError("(step {0}) Simulation.step_through(): Unrecognised detector ID found ('{1}').".format(self.curr_step, detector_id))
                 for data_key, data_val in last_step_data["detector"][detector_id].items():
                     all_data["data"]["detector"][detector_id][data_key].append(data_val)
 
@@ -275,7 +338,10 @@ class Simulation:
             all_data["data"]["vehicle"]["tts"] = get_cumulative_arr(all_data["data"]["vehicle"]["tts"], prev_steps)
 
         all_data["end"] = self.curr_step
+        if self.track_juncs: all_data["data"]["junctions"] = last_step_data["junctions"]
         if self.scheduler != None: all_data["data"]["events"] = self.scheduler.__dict__()
+        for e_id, edge in self.tracked_edges.items(): all_data["data"]["edges"][e_id] = edge.get_curr_data()
+        for c_id, controller in self.controllers.items(): all_data["data"]["controllers"][c_id] = controller.get_curr_data()
 
         if keep_data:
             self.all_data = all_data
@@ -292,13 +358,16 @@ class Simulation:
         :return dict:         Simulation data
         """
 
-        data = {"detector": {}, "vehicle": {}, "junctions": {}}
+        data = {"detector": {}, "vehicle": {}}
+        if self.track_juncs: data["junctions"] = {}
         
         traci.simulationStep()
         time_diff = traci.simulation.getTime() - self.time_val
         self.time_val = traci.simulation.getTime()
 
-        self.all_curr_vehicle_ids = list(traci.vehicle.getIDList())
+        self.all_curr_vehicle_ids = set(traci.vehicle.getIDList())
+        self.all_loaded_vehicle_ids = set(traci.vehicle.getLoadedIDList())
+        self.all_to_depart_vehicle_ids = self.all_loaded_vehicle_ids - self.all_curr_vehicle_ids
 
         if self.junc_phases != None:
             update_junc_lights = []
@@ -321,14 +390,14 @@ class Simulation:
         if detector_list == None: detector_list = list(self.available_detectors.keys())
         for detector_id in detector_list:
             data["detector"][detector_id] = {}
-            if detector_id not in self.available_detectors.keys(): raise KeyError("(step {0}) Sim.step_through: Unrecognised detector ID found ('{1}').".format(self.curr_step, detector_id))
-            if self.available_detectors[detector_id] == "multientryexit":
+            if detector_id not in self.available_detectors.keys(): raise KeyError("(step {0}) Simulation.step(): Unrecognised detector ID found ('{1}').".format(self.curr_step, detector_id))
+            if self.available_detectors[detector_id]["type"] == "multientryexit":
 
                 detector_data = self.get_last_step_detector_data(detector_id, ["speed", "veh_count"])
                 data["detector"][detector_id]["speeds"] = detector_data["speed"]
                 data["detector"][detector_id]["veh_counts"] = detector_data["veh_count"]
                 
-            elif self.available_detectors[detector_id] == "inductionloop":
+            elif self.available_detectors[detector_id]["type"] == "inductionloop":
 
                 detector_data = self.get_last_step_detector_data(detector_id, ["speed", "veh_count", "occupancy"])
                 data["detector"][detector_id]["speeds"] = detector_data["speed"]
@@ -336,7 +405,7 @@ class Simulation:
                 data["detector"][detector_id]["occupancies"] = detector_data["occupancy"]
 
             else:
-                if not self.suppress_warnings: print("(step {0}) (WARNING) Sim.step: Unknown detector type '{1}'.".format(self.curr_step, self.available_detectors[detector_id]))
+                if not self.suppress_warnings: print("(step {0}) (WARNING) Simulation.step(): Unknown detector type '{1}'.".format(self.curr_step, self.available_detectors[detector_id]["type"]))
 
             data["detector"][detector_id]["veh_ids"] = self.get_last_step_detector_vehicles(detector_id)
 
@@ -370,15 +439,15 @@ class Simulation:
         vehicle_ids = [] if flatten else {}
         for detector_id in detector_ids:
             
-            if detector_id not in self.available_detectors.keys(): raise KeyError("(step {0}) Sim.get_last_step_detector_vehicles: Detector ID '{1}' not found.".format(self.curr_step, detector_id))
-            detector_type = self.available_detectors[detector_id]
+            if detector_id not in self.available_detectors.keys(): raise KeyError("(step {0}) Simulation.get_last_step_detector_vehicles(): Detector ID '{1}' not found.".format(self.curr_step, detector_id))
+            detector_type = self.available_detectors[detector_id]["type"]
 
             if detector_type == "inductionloop":
                 detected_vehicles = list(traci.inductionloop.getLastStepVehicleIDs(detector_id))
             elif detector_type == "multientryexit":
                 detected_vehicles = list(traci.multientryexit.getLastStepVehicleIDs(detector_id))
             else:
-                raise KeyError("(step {0}) Sim.get_last_step_detector_vehicles: Unknown detector type '{1}'".format(self.curr_step, detector_type))
+                raise KeyError("(step {0}) Simulation.get_last_step_detector_vehicles(): Unknown detector type '{1}'".format(self.curr_step, detector_type))
             
             if v_types != None:
                 detected_vehicles = [vehicle_id for vehicle_id in detected_vehicles if self.get_vehicle_vals(vehicle_id, "type") in v_types]
@@ -399,14 +468,14 @@ class Simulation:
         """
 
         if detector_id not in self.available_detectors.keys():
-            raise KeyError("(step {0}) Sim.get_last_step_detector_data: Detector with ID '{1}' not found.".format(self.curr_step, detector_id))
+            raise KeyError("(step {0}) Simulation.get_last_step_detector_data(): Detector with ID '{1}' not found.".format(self.curr_step, detector_id))
         else:
-            detector_type = self.available_detectors[detector_id]
+            detector_type = self.available_detectors[detector_id]["type"]
 
             match detector_type:
                 case "multientryexit": d_class = traci.multientryexit
                 case "inductionloop": d_class = traci.inductionloop
-                case "_": raise ValueError("(step {0}) Sim.get_last_step_detector_data: Only 'multientryexit' and 'inductionloop' detectors are currently supported (not '{1}').".format(self.curr_step, detector_type))
+                case "_": raise ValueError("(step {0}) Simulation.get_last_step_detector_data(): Only 'multientryexit' and 'inductionloop' detectors are currently supported (not '{1}').".format(self.curr_step, detector_type))
             
         detector_data = {}
         if not isinstance(data_keys, (list, tuple)): data_keys = [data_keys]
@@ -434,7 +503,7 @@ class Simulation:
                             detector_data[data_key] = d_class.getTimeSinceDetection(detector_id)
                         else: known_key = False
                     if not known_key:
-                        raise KeyError("(step {0}) Sim.get_last_step_detector_data: Unrecognised data key ('{1}').".format(self.curr_step, data_key))
+                        raise KeyError("(step {0}) Simulation.get_last_step_detector_data(): Unrecognised data key ('{1}').".format(self.curr_step, data_key))
                     
         if len(data_keys) == 1: return detector_data[data_keys[0]]
         else: return detector_data
@@ -449,9 +518,9 @@ class Simulation:
         :return float|dict: Either single value or dict containing values by data_key
         """
 
-        if self.all_data == None: raise AssertionError("(step {0}) Sim.get_interval_detector_data: No detector data as the simulation has not been run or data has been reset.".format(self.curr_step))
+        if self.all_data == None: raise AssertionError("(step {0}) Simulation.get_interval_detector_data(): No detector data as the simulation has not been run or data has been reset.".format(self.curr_step))
         elif detector_id not in self.available_detectors.keys() or detector_id not in self.all_data["data"]["detector"].keys():
-            raise KeyError("(step {0}) Sim.get_interval_detector_data: Detector with ID '{1}' not found.".format(self.curr_step, detector_id))
+            raise KeyError("(step {0}) Simulation.get_interval_detector_data(): Detector with ID '{1}' not found.".format(self.curr_step, detector_id))
 
         detector_data = {}
         if not isinstance(data_keys, (list, tuple)): data_keys = [data_keys]
@@ -460,8 +529,8 @@ class Simulation:
                 if data_key in self.all_data["data"]["detector"][detector_id].keys():
                     data_arr = self.all_data["data"]["detector"][detector_id][data_key][-n_steps:]
                     if avg_vals: data_arr = sum(data_arr) / len(data_arr)
-                else: raise KeyError("(step {0}) Sim.get_interval_detector_data: Detector '{1}' of type '{2}' does not collect '{3}' data.".format(self.curr_step, detector_id, self.all_data["data"]["detector"][detector_id]["type"], data_key))
-            else: raise KeyError("(step {0}) Sim.get_interval_detector_data: Unrecognised data key ('{1}').".format(self.curr_step, data_key))
+                else: raise KeyError("(step {0}) Simulation.get_interval_detector_data(): Detector '{1}' of type '{2}' does not collect '{3}' data.".format(self.curr_step, detector_id, self.all_data["data"]["detector"][detector_id]["type"], data_key))
+            else: raise KeyError("(step {0}) Simulation.get_interval_detector_data(): Unrecognised data key ('{1}').".format(self.curr_step, data_key))
             detector_data[data_key] = data_arr
 
         if len(data_keys) == 1: return detector_data[data_keys[0]]
@@ -487,12 +556,12 @@ class Simulation:
         for junc_id in new_junc_phases.keys():
 
             if junc_id not in list(traci.trafficlight.getIDList()):
-                raise KeyError("(step {0}) Sim.set_phases: Junction with ID '{1}' does not exist, or it does not have a traffic light.".format(self.curr_step, junc_id))
+                raise KeyError("(step {0}) Simulation.set_phases(): Junction with ID '{1}' does not exist, or it does not have a traffic light.".format(self.curr_step, junc_id))
 
             junc_phase = self.junc_phases[junc_id]
 
             for t in junc_phase["times"]:
-                if t <= self.step_length: raise ValueError("(step {0}) Sim.set_phases: Invalid phase duration (phase_dur ({1}) <= resolution ({2})).".format(self.curr_step, t, self.step_length))
+                if t <= self.step_length: raise ValueError("(step {0}) Simulation.set_phases(): Invalid phase duration (phase_dur ({1}) <= resolution ({2})).".format(self.curr_step, t, self.step_length))
 
             if "curr_phase" not in junc_phase.keys(): junc_phase["curr_phase"] = start_phase
             if junc_phase["curr_phase"] > len(junc_phase["phases"]): junc_phase["curr_phase"] -= len(junc_phase["phases"])
@@ -510,7 +579,7 @@ class Simulation:
         """
         
         if junction_id not in list(traci.trafficlight.getIDList()):
-            raise KeyError("(step {0}) Sim.set_tl_colour: Junction with ID '{1}' does not exist, or it does not have a traffic light.".format(self.curr_step, junction_id))
+            raise KeyError("(step {0}) Simulation.set_tl_colour(): Junction with ID '{1}' does not exist, or it does not have a traffic light.".format(self.curr_step, junction_id))
         else:
             if junction_id in self.tracked_juncs.keys():
                 m_len = self.tracked_juncs[junction_id].m_len
@@ -518,14 +587,14 @@ class Simulation:
                 state_str = traci.trafficlight.getRedYellowGreenState(junction_id)
                 m_len = len(state_str)
 
-        if not isinstance(colour_str, str): raise TypeError("(step {0}) Sim.set_tl_colour: Invalid colour_str (must be 'str', not '{1}').".format(self.curr_step, type(colour_str).__name__))
+        if not isinstance(colour_str, str): raise TypeError("(step {0}) Simulation.set_tl_colour(): Invalid colour_str (must be 'str', not '{1}').".format(self.curr_step, type(colour_str).__name__))
         
         if len(colour_str) == 1:
             junc_phases = {junction_id: {"phases": [colour_str*m_len], "times": [math.inf]}}
         elif len(colour_str) == m_len:
             junc_phases = {junction_id: {"phases": [colour_str], "times": [math.inf]}}
         else:
-            raise ValueError("(step {0}) Sim.set_tl_colour: Invalid colour_str (must be char or len(str) = junction movements length).".format(self.curr_step))
+            raise ValueError("(step {0}) Simulation.set_tl_colour(): Invalid colour_str (must be char or len(str) = junction movements length).".format(self.curr_step))
         
         self.set_phases(junc_phases, overwrite=False)
 
@@ -541,7 +610,7 @@ class Simulation:
         """
 
         if junction_id not in list(traci.trafficlight.getIDList()):
-            raise KeyError("(step {0}) Sim.set_tl_colour: Junction with ID '{1}' does not exist, or it does not have a traffic light.".format(self.curr_step, junction_id))
+            raise KeyError("(step {0}) Simulation.set_tl_metering_rate(): Junction with ID '{1}' does not exist, or it does not have a traffic light.".format(self.curr_step, junction_id))
         else:
             if junction_id in self.tracked_juncs.keys():
                 m_len = self.tracked_juncs[junction_id].m_len
@@ -554,7 +623,7 @@ class Simulation:
             self.tracked_juncs[junction_id].rate_times.append(self.curr_step)
 
         if min_red < self.step_length:
-            if not self.suppress_warnings: print("(step {0}) (WARNING) Sim.set_tl_colour: Minimum red duration ({1}s) is being set to step length ({2}s).".format(self.curr_step, min_red, self.step_length))
+            if not self.suppress_warnings: print("(step {0}) (WARNING) Simulation.set_tl_metering_rate(): Minimum red duration ({1}s) is being set to step length ({2}s).".format(self.curr_step, min_red, self.step_length))
             min_red = self.step_length
 
         if flow_rate > 0:
@@ -573,7 +642,7 @@ class Simulation:
         elif flow_rate == 0:
             phases_dict = {"phases": ['R'*m_len], "times": [math.inf]}
         
-        else: raise ValueError("(step {0}) Sim.set_tl_colour: Flow rate ({1}) must be above 0.".format(self.curr_step, flow_rate))
+        else: raise ValueError("(step {0}) Simulation.set_tl_metering_rate(): Flow rate ({1}) must be above 0.".format(self.curr_step, flow_rate))
 
         self.set_phases({junction_id: phases_dict}, overwrite=False)
         
@@ -592,7 +661,7 @@ class Simulation:
 
             self.update_lights(junction_id)
 
-        else: raise ValueError("(step {0}) Sim.change_phase: Invalid phase number '{1}' (must be [0-{2}]).".format(self.curr_step, phase_no, len(self.junc_phases[junction_id]["phases"])))
+        else: raise ValueError("(step {0}) Simulation.change_phase(): Invalid phase number '{1}' (must be [0-{2}]).".format(self.curr_step, phase_no, len(self.junc_phases[junction_id]["phases"])))
 
     def update_lights(self, junction_ids: list|str = None) -> None:
         """
@@ -614,26 +683,43 @@ class Simulation:
 
     def vehicle_exists(self, vehicle_id: str) -> bool:
         """
-        Tests if vehicle exists in the network.
+        Tests if a vehicle exists in the network and has departed.
         :return bool: True if ID in list of current vehicle IDs 
         """
         return vehicle_id in self.all_curr_vehicle_ids
+    
+    def vehicle_loaded(self, vehicle_id: str) -> bool:
+        """
+        Tests if a vehicle is loaded (may not have departed).
+        :return bool: True if ID in list of loaded vehicle IDs
+        """
+        return vehicle_id in self.all_loaded_vehicle_ids
+    
+    def vehicle_departed(self, vehicle_id: str) -> bool:
+        """
+        Tests if a vehicle is loaded but has not departed yet.
+        :return bool: True if vehicle has not departed yet
+        """
+        if not self.vehicle_loaded(vehicle_id):
+            raise KeyError("(step {0}) Simulation.vehicle_departed(): Vehicle with ID '{1}' has not been loaded.".format(self.curr_step, vehicle_id))
+        return vehicle_id in self.all_to_depart_vehicle_ids
     
     def set_vehicle_vals(self, vehicle_id: str, **kwargs) -> None:
         """
         Calls the TraCI API to change a vehicle's state.
         :param vehicle_id: Vehicle ID
         :param highlight: Highlights vehicle with specified colour [str|(int)]
-        :param setSpeed: Set new speed value [int|float]
-        :param setMaxSpeed: Set new max speed value [int|float]
-        :param setAcceleration: Set acceleration for a given duration ([int|float], [int|float])
-        :param changeLane: Try and change lane for a given duration (int, [int|float])
-        :param changeTarget: Set vehicle destination edge ID [str]
-        :param changeRoute: Set vehicle route, either by route ID or list of edges [str|(str)]
+        :param speed: Set new speed value [int|float]
+        :param max_speed: Set new max speed value [int|float]
+        :param acceleration: Set acceleration for a given duration ([int|float], [int|float])
+        :param lane_idx: Try and change lane for a given duration (int, [int|float])
+        :param target: Set vehicle destination edge ID [str]
+        :param route_id: Set vehicle route by route ID or list of edges (str)
+        :param route_edges: Set vehicle route by list of edges ([str])
         """
         
         if not self.vehicle_exists(vehicle_id):
-            raise KeyError("(step {0}) Sim.set_vehicle_vals: Unrecognised vehicle ID given ('{1}').".format(self.curr_step, vehicle_id))
+            raise KeyError("(step {0}) Simulation.set_vehicle_vals(): Unrecognised vehicle ID given ('{1}').".format(self.curr_step, vehicle_id))
         
         for command, value in kwargs.items():
             match command:
@@ -642,12 +728,12 @@ class Simulation:
                         colour = value
                         if isinstance(colour, str):
                             if "#" in colour: colour = colour.lstrip("#")
-                            if len(colour) != 6: raise ValueError("(step {0}) Sim.set_vehicle_vals ({1}): '{2}' is not a valid hex colour.".format(self.curr_step, command, colour))
+                            if len(colour) != 6: raise ValueError("(step {0}) Simulation.set_vehicle_vals():({1}): '{2}' is not a valid hex colour.".format(self.curr_step, command, colour))
                             colour = tuple(int(colour[i:i+2], 16) for i in (0, 2, 4))
                         elif not isinstance(colour, (list, tuple)):
-                            raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): Invalid colour (must be [str|list|tuple], not '{2}').".format(self.curr_step, command, type(colour).__name__))
+                            raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): Invalid colour (must be [str|list|tuple], not '{2}').".format(self.curr_step, command, type(colour).__name__))
                         elif len(colour) not in [3, 4] or all(x > 255 for x in colour) or all(x < 0 for x in colour):
-                            raise ValueError("(step {0}) Sim.set_vehicle_vals ({1}): '{2}' is not a valid RGB or RGBA colour.".format(self.curr_step, command, colour))
+                            raise ValueError("(step {0}) Simulation.set_vehicle_vals() ({1}): '{2}' is not a valid RGB or RGBA colour.".format(self.curr_step, command, colour))
                         
                         if len(colour) == 3: colour = list(colour) + [255]
 
@@ -661,63 +747,70 @@ class Simulation:
                     if isinstance(value, (int, float)): 
                         if self.units.name in ['IMPERIAL', 'UK']: traci.vehicle.setSpeed(vehicle_id, value / 2.2369362920544)
                         else: traci.vehicle.setSpeed(vehicle_id, value / 3.6)
-                    else: raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): Invalid speed value '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
+                    else: raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): Invalid speed value '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
                 
                 case "max_speed":
                     if isinstance(value, (int, float)):
                         if self.units.name in ['IMPERIAL', 'UK']: traci.vehicle.setMaxSpeed(vehicle_id, value / 2.2369362920544)
                         else: traci.vehicle.setMaxSpeed(vehicle_id, value / 3.6)
-                    else: raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): Invalid max speed value '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
+                    else: raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): Invalid max speed value '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
                 
                 case "acceleration":
                     if isinstance(value, (list, tuple)) and len(value) == 2:
                         if not isinstance(value[0], (int, float)):
-                            raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): Invalid acceleration '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value[0], type(value[0]).__name__))
+                            raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): Invalid acceleration '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value[0], type(value[0]).__name__))
                         if not isinstance(value[1], (int, float)):
-                            raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): Invalid laneIndex '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value[1], type(value[1]).__name__))
+                            raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): Invalid laneIndex '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value[1], type(value[1]).__name__))
                         traci.vehicle.setAcceleration(vehicle_id, float(value[0]), float(value[1]))
-                    else: raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): '{1}' requires 2 parameters (acceleration [int|float], duration [int|float])".format(self.curr_step, command))
+                    else: raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): '{1}' requires 2 parameters (acceleration [int|float], duration [int|float])".format(self.curr_step, command))
 
                 case "lane_idx":
                     if isinstance(value, (list, tuple)) and len(value) == 2:
-                        if not isinstance(value[0], int): raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): Invalid laneIndex '{2}' (must be int, not '{3}').".format(self.curr_step, command, value[0], type(value[0]).__name__))
+                        if not isinstance(value[0], int): raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): Invalid laneIndex '{2}' (must be int, not '{3}').".format(self.curr_step, command, value[0], type(value[0]).__name__))
                         if not isinstance(value[1], (int, float)):
-                            raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): Invalid duration '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value[1], type(value[1]).__name__))
+                            raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): Invalid duration '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value[1], type(value[1]).__name__))
                         traci.vehicle.changeLane(vehicle_id, value[0], float(value[1]))
-                    else: raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): '{1}' requires 2 parameters (laneIndex [int], duration [int|float])".format(self.curr_step, command))
+                    else: raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): '{1}' requires 2 parameters (laneIndex [int], duration [int|float])".format(self.curr_step, command))
 
                 case "target":
-                    if isinstance(value, str): traci.vehicle.changeTarget(vehicle_id, value)
-                    else: raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): Invalid edge ID '{2}' (must be str, not '{3}').".format(self.curr_step, command, value, type(value).__name__))
+                    if isinstance(value, str):
+                        if value not in self.all_edges: raise KeyError("(step {0}) Simulation.set_vehicle_vals() ({1}): Edge ID '{2}' not found.".format(self.curr_step, command, value))
+                        traci.vehicle.changeTarget(vehicle_id, value)
+                    else: raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): Invalid edge ID '{2}' (must be str, not '{3}').".format(self.curr_step, command, value, type(value).__name__))
                 
                 case "route_id":
-                    if isinstance(value, str): traci.vehicle.setRouteID(vehicle_id, value)
-                    else: raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): Invalid route ID value '{2}' (must be str, not '{3}').".format(self.curr_step, command, value, type(value).__name__))
+                    if isinstance(value, str):
+                        if value not in self.all_routes: raise KeyError("(step {0}) Simulation.set_vehicle_vals() ({1}): Route ID '{2}' not found.".format(self.curr_step, command, value))
+                        traci.vehicle.setRouteID(vehicle_id, value)
+                    else: raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): Invalid route ID value '{2}' (must be str, not '{3}').".format(self.curr_step, command, value, type(value).__name__))
                 
                 case "route_edges":
-                    if isinstance(value, (list, tuple)) and all(isinstance(x, str) for x in value): traci.vehicle.setRoute(value)
-                    else: raise TypeError("(step {0}) Sim.set_vehicle_vals ({1}): Invalid route egdes value '{2}' (must be (str), not '{3}').".format(self.curr_step, command, value, type(value).__name__))
+                    if isinstance(value, (list, tuple)) and all(isinstance(x, str) for x in value):
+                        for e_id in value:
+                            if e_id not in self.all_edges: raise KeyError("(step {0}) Simulation.set_vehicle_vals() ({1}): Edge ID '{2}' in route edges not found.".format(self.curr_step, command, e_id))
+                        traci.vehicle.setRoute(value)
+                    else: raise TypeError("(step {0}) Simulation.set_vehicle_vals() ({1}): Invalid route egdes value '{2}' (must be (str), not '{3}').".format(self.curr_step, command, value, type(value).__name__))
 
                 case _:
-                    raise ValueError("(step {0}) Sim.set_vehicle_vals: Unrecognised command ('{1}').".format(self.curr_step, command))
+                    raise ValueError("(step {0}) Simulation.set_vehicle_vals(): Unrecognised command ('{1}').".format(self.curr_step, command))
 
     def get_vehicle_vals(self, vehicle_id: str, data_keys: str|list) -> dict|str|int|float|list:
         """
         Get data values for specific vehicle using a list of data keys.
         :param vehicle_id: Vehicle ID
-        :param data_keys: List of keys from [len|speed|pos|heading|ts|route_id|route_edges], or single key
+        :param data_keys: List of keys from [type|length|speed|max_speed|acceleration|position|heading|ts|lane_idx|target|route_id|route_idx|route_edges], or single key
         :return dict: Values by data_key (or single value)
         """
 
         if not self.vehicle_exists(vehicle_id):
-            raise KeyError("(step {0}) Sim.get_vehicle_vals: Unrecognised vehicle ID given ('{1}').".format(self.curr_step, vehicle_id))
+            raise KeyError("(step {0}) Simulation.get_vehicle_vals(): Unrecognised vehicle ID given ('{1}').".format(self.curr_step, vehicle_id))
 
         return_val = False
         if isinstance(data_keys, str):
             data_keys = [data_keys]
             return_val = True
         elif not isinstance(data_keys, (list, tuple)):
-            raise TypeError("(step {0}) Sim.get_vehicle_vals: Invalid data_keys given '{1}' (must be [str|(str)], not '{2}').".format(self.curr_step, data_keys, type(data_keys).__name__))
+            raise TypeError("(step {0}) Simulation.get_vehicle_vals(): Invalid data_keys given '{1}' (must be [str|(str)], not '{2}').".format(self.curr_step, data_keys, type(data_keys).__name__))
         
         data_vals = {}
         for data_key in data_keys:
@@ -756,13 +849,15 @@ class Simulation:
                     data_vals[data_key] = list(traci.vehicle.getRoute(vehicle_id))[-1]
                 case "route_id":
                     data_vals[data_key] = traci.vehicle.getRouteID(vehicle_id)
+                case "route_idx":
+                    data_vals[data_key] = traci.vehicle.getRouteIndex(vehicle_id)
                 case "route_edges":
                     data_vals[data_key] = list(traci.vehicle.getRoute(vehicle_id))
                 case _:
-                    raise ValueError("(step {0}) Sim.get_vehicle_vals: Unrecognised key ('{1}').".format(self.curr_step, data_key))
+                    raise ValueError("(step {0}) Simulation.get_vehicle_vals(): Unrecognised key ('{1}').".format(self.curr_step, data_key))
 
         if set(data_vals.keys()) != set(data_vals):
-            raise ValueError("(step {0}) Sim.get_edge_vals: Invalid data_keys given (must be from accepted list).".format(self.curr_step))
+            raise ValueError("(step {0}) Simulation.get_vehicle_vals(): Invalid data_keys given (must be from accepted list).".format(self.curr_step))
         if return_val: return list(data_vals.values())[0]
         else: return data_vals
     
@@ -775,9 +870,9 @@ class Simulation:
         """
 
         if not self.vehicle_exists(vehicle_id):
-            if assert_exists: raise KeyError("(step {0}) Sim.get_vehicle_data: Unrecognised vehicle ID found ('{1}').".format(self.curr_step, vehicle_id))
+            if assert_exists: raise KeyError("(step {0}) Simulation.get_vehicle_data(): Unrecognised vehicle ID found ('{1}').".format(self.curr_step, vehicle_id))
             elif not self.suppress_warnings:
-                print("(step {0}) (WARNING) Sim.get_vehicle_data: Unrecognised vehicle ID given ('{1}').".format(self.curr_step, vehicle_id))
+                print("(step {0}) (WARNING) Simulation.get_vehicle_data(): Unrecognised vehicle ID given ('{1}').".format(self.curr_step, vehicle_id))
                 return None
         
         vehicle_data = self.get_vehicle_vals(vehicle_id, ("type", "speed", "position", "heading", "ts", "length"))
@@ -853,29 +948,32 @@ class Simulation:
     
     def get_geometry_vals(self, geometry_id: str|int, data_keys: str|list) -> dict|str|int|float|list:
         """
-        Get data values for specific edge or lane using a list of data keys, from: (edge or lane) vehicle_ids, vehicle_speed,
-        vehicle_halting, vehicle_occupancy, tt (travel time), emissions, (edge only) street_name, n_lanes, (lane only) edge_id
-        n_links, permissions, max_speed
+        Get data values for specific edge or lane using a list of data keys, from: (edge or lane) n_vehicles, vehicle_ids, vehicle_speed,
+        vehicle_halting, vehicle_occupancy, tt (travel time), emissions, max_speed (avg of lane speeds) | (edge only) street_name,
+        n_lanes, lane_ids | (lane only) edge_id, n_links, permissions
         :param edge_id: Either lane or edge ID
         :param data_keys: List of keys or single key
         :return dict: Values by data_key (or single value)
         """
         
         g_name = self.geometry_exists(geometry_id)
-        if g_name == "edge": g_class = traci.edge
-        elif g_name == "lane": g_class = traci.lane
-        else: raise KeyError("(step {0}) Sim.get_edge_vals: Geometry ID '{1}' not found.".format(self.curr_step, geometry_id))
+        if g_name == "EDGE": g_class = traci.edge
+        elif g_name == "LANE": g_class = traci.lane
+        else: raise KeyError("(step {0}) Simulation.get_geometry_vals(): Geometry ID '{1}' not found.".format(self.curr_step, geometry_id))
 
         return_val = False
         if isinstance(data_keys, str):
             data_keys = [data_keys]
             return_val = True
         elif not isinstance(data_keys, (list, tuple)):
-            raise TypeError("(step {0}) Sim.get_edge_vals: Invalid data_keys given '{1}' (must be [str|(str)], not '{2}').".format(self.curr_step, data_keys, type(data_keys).__name__))
+            raise TypeError("(step {0}) Simulation.get_geometry_vals(): Invalid data_keys given '{1}' (must be [str|(str)], not '{2}').".format(self.curr_step, data_keys, type(data_keys).__name__))
         
         data_vals = {}
         for data_key in data_keys:
             match data_key:
+                case "n_vehicles":
+                    data_vals[data_key] = g_class.getLastStepVehicleNumber(geometry_id)
+                    continue
                 case "vehicle_ids":
                     data_vals[data_key] = g_class.getLastStepVehicleIDs(geometry_id)
                     continue
@@ -897,15 +995,25 @@ class Simulation:
                                             "PMx": g_class.getPMxEmission(geometry_id), "NOx": g_class.getNOxEmission(geometry_id)})
                     continue
                     
-            if g_name == "edge":
+            if g_name == "EDGE":
                 match data_key:
                     case "street_name":
                         data_vals[data_key] = g_class.getStreetName(geometry_id)
                     case "n_lanes":
                         data_vals[data_key] = g_class.getLaneNumber(geometry_id)
+                    case "lane_ids":
+                        n_lanes = g_class.getLaneNumber(geometry_id)
+                        data_vals[data_key] = ["{0}_{1}".format(geometry_id, idx) for idx in range(n_lanes)]
+                    case "max_speed":
+                        n_lanes = g_class.getLaneNumber(geometry_id)
+                        lane_ids = ["{0}_{1}".format(geometry_id, idx) for idx in range(n_lanes)]
+                        avg_lane_speed = sum([traci.lane.getMaxSpeed(lane_id) for lane_id in lane_ids])/len(lane_ids)
+
+                        if self.units.name in ['IMPERIAL', 'UK']: data_vals[data_key] = avg_lane_speed * 2.2369362920544
+                        else: data_vals[data_key] = avg_lane_speed * 3.6
                     case _:
-                        raise ValueError("(step {0}) Sim.get_vehicle_vals: Unrecognised key ('{1}').".format(self.curr_step, data_key))
-            elif g_name == "lane":
+                        raise ValueError("(step {0}) Simulation.get_geometry_vals(): Unrecognised key ('{1}').".format(self.curr_step, data_key))
+            elif g_name == "LANE":
                 match data_key:
                     case "edge_id":
                         data_vals[data_key] = g_class.getEdgeID(geometry_id)
@@ -923,10 +1031,10 @@ class Simulation:
                         if self.units.name in ['IMPERIAL', 'UK']: data_vals[data_key] = g_class.getMaxSpeed(geometry_id) * 2.2369362920544
                         else: data_vals[data_key] = g_class.getMaxSpeed(geometry_id) * 3.6
                     case _:
-                        raise ValueError("(step {0}) Sim.get_vehicle_vals: Unrecognised key ('{1}').".format(self.curr_step, data_key))
+                        raise ValueError("(step {0}) Simulation.get_geometry_vals(): Unrecognised key ('{1}').".format(self.curr_step, data_key))
         
         if set(data_vals.keys()) != set(data_vals):
-            raise ValueError("(step {0}) Sim.get_edge_vals: Invalid data_keys given (must be from accepted list).".format(self.curr_step))
+            raise ValueError("(step {0}) Simulation.get_geometry_vals(): Invalid data_keys given (must be from accepted list).".format(self.curr_step))
         if return_val: return list(data_vals.values())[0]
         else: return data_vals
 
@@ -934,15 +1042,16 @@ class Simulation:
         """
         Calls the TraCI API to change a edge or lane's state.
         :param geometry_id: Edge or lane ID
-        :param setMaxSpeed: Set new max speed value [int|float]
-        :param setAllowed: Set allowed vehicle types [(str)], empty list allows all (lane only)
-        :param setDisallowed: Set disallowed vehicle types [(str)] (lane only)
-        :param setChangePermissions: Set lane change permission with type list and direction [(str), ['LEFT'|'RIGHT']] (lane only)
+        :param max_speed: Set new max speed value [int|float]
+        :param allowed: Set allowed vehicle types [(str)], empty list allows all (lane only)
+        :param disallowed: Set disallowed vehicle types [(str)] (lane only)
+        :param left_lc: Set left lane changing vehicle permission with by vtype list [(str)] (lane only)
+        :param right_lc: Set right lane changing vehicle permission with by vtype list [(str)] (lane only)
         """
         
-        if geometry_id in self.all_edges:   g_class, g_name = traci.edge, "edge"
-        elif geometry_id in self.all_lanes: g_class, g_name = traci.lane, "lane"
-        else: raise KeyError("(step {0}) Sim.get_edge_vals: Unrecognised egde or lane ID given ('{1}').".format(self.curr_step, geometry_id))
+        if geometry_id in self.all_edges:   g_class, g_name = traci.edge, "EDGE"
+        elif geometry_id in self.all_lanes: g_class, g_name = traci.lane, "LANE"
+        else: raise KeyError("(step {0}) Simulation.set_geometry_vals(): Unrecognised egde or lane ID given ('{1}').".format(self.curr_step, geometry_id))
         
         for command, value in kwargs.items():
             match command:
@@ -950,10 +1059,10 @@ class Simulation:
                     if isinstance(value, (int, float)): 
                         if self.units.name in ['IMPERIAL', 'UK']: g_class.setMaxSpeed(geometry_id, value / 2.2369362920544)
                         else: g_class.setMaxSpeed(geometry_id, value / 3.6)
-                    else: raise TypeError("(step {0}) Sim.set_geometry_vals ({1}): Invalid speed value '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
+                    else: raise TypeError("(step {0}) Simulation.set_geometry_vals() ({1}): Invalid speed value '{2}' (must be [int|float], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
 
                 case "allowed":
-                    if g_name != "lane": raise ValueError("(step {0}) Sim.set_geometry_vals ({1}): Command is only valid for lanes.".format(self.curr_step, command))
+                    if g_name != "LANE": raise ValueError("(step {0}) Simulation.set_geometry_vals() ({1}): Command is only valid for lanes.".format(self.curr_step, command))
                     if isinstance(value, (list, tuple)):
                         curr_allowed = list(g_class.getAllowed(geometry_id))
                         allowed = tuple(set(curr_allowed + list(value)))
@@ -962,10 +1071,10 @@ class Simulation:
                         curr_disallowed = list(g_class.getDisallowed(geometry_id))
                         disallowed = tuple(set(curr_disallowed) - set(value))
                         g_class.setDisallowed(geometry_id, disallowed)
-                    else: raise TypeError("(step {0}) Sim.set_geometry_vals ({1}): Invalid type list value '{2}' (must be [str], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
+                    else: raise TypeError("(step {0}) Simulation.set_geometry_vals() ({1}): Invalid type list value '{2}' (must be [str], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
 
                 case "disallowed":
-                    if g_name != "lane": raise ValueError("(step {0}) Sim.set_geometry_vals ({1}): Command is only valid for lanes.".format(self.curr_step, command))
+                    if g_name != "LANE": raise ValueError("(step {0}) Simulation.set_geometry_vals() ({1}): Command is only valid for lanes.".format(self.curr_step, command))
                     if isinstance(value, (list, tuple)):
                         curr_disallowed = list(g_class.getDisallowed(geometry_id))
                         disallowed = tuple(set(curr_disallowed + list(value)))
@@ -974,22 +1083,22 @@ class Simulation:
                         curr_allowed = list(g_class.getAllowed(geometry_id))
                         allowed = tuple(set(curr_allowed) - set(value))
                         g_class.setAllowed(geometry_id, allowed)
-                    else: raise TypeError("(step {0}) Sim.set_geometry_vals ({1}): Invalid type list value '{2}' (must be [str], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
+                    else: raise TypeError("(step {0}) Simulation.set_geometry_vals() ({1}): Invalid type list value '{2}' (must be [str], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
 
                 case "left_lc":
-                    if g_name != "lane": raise ValueError("(step {0}) Sim.set_geometry_vals ({1}): Command is only valid for lanes.".format(self.curr_step, command))
+                    if g_name != "LANE": raise ValueError("(step {0}) Simulation.set_geometry_vals() ({1}): Command is only valid for lanes.".format(self.curr_step, command))
                     if isinstance(value, (list, tuple)):
                         g_class.setChangePermissions(geometry_id, value[0], 1)
-                    else: raise TypeError("(step {0}) Sim.set_geometry_vals ({1}): Invalid type list value '{2}' (must be [str], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
+                    else: raise TypeError("(step {0}) Simulation.set_geometry_vals() ({1}): Invalid type list value '{2}' (must be [str], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
                 
                 case "right_lc":
-                    if g_name != "lane": raise ValueError("(step {0}) Sim.set_geometry_vals ({1}): Command is only valid for lanes.".format(self.curr_step, command))
+                    if g_name != "LANE": raise ValueError("(step {0}) Simulation.set_geometry_vals() ({1}): Command is only valid for lanes.".format(self.curr_step, command))
                     if isinstance(value, (list, tuple)):
                         g_class.setChangePermissions(geometry_id, value[0], -1)
-                    else: raise TypeError("(step {0}) Sim.set_geometry_vals ({1}): Invalid type list value '{2}' (must be [str], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
+                    else: raise TypeError("(step {0}) Simulation.set_geometry_vals() ({1}): Invalid type list value '{2}' (must be [str], not '{3}').".format(self.curr_step, command, value, type(value).__name__))
 
                 case _:
-                    raise ValueError("(step {0}) Sim.set_vehicle_vals: Unrecognised command ('{1}').".format(self.curr_step, command))
+                    raise ValueError("(step {0}) Simulation.set_vehicle_vals(): Unrecognised command ('{1}').".format(self.curr_step, command))
                 
     def get_last_step_geometry_vehicles(self, geometry_ids: str|list, v_types: list|None = None, flatten: bool = False) -> dict|list:
         """
@@ -1026,8 +1135,8 @@ class Simulation:
         :return str|None: Geometry type, or None if it does not exist.
         """
 
-        if geometry_id in self.all_edges: return "edge"
-        elif geometry_id in self.all_lanes: return "lane"
+        if geometry_id in self.all_edges: return "EDGE"
+        elif geometry_id in self.all_lanes: return "LANE"
         else: return None
 
     def detector_exists(self, detector_id: str) -> str|None:
@@ -1038,18 +1147,17 @@ class Simulation:
         """
 
         if detector_id in self.available_detectors.keys():
-            return self.available_detectors[detector_id]
+            return self.available_detectors[detector_id]["type"]
         else: return None
 
-class Junction:
+class TrackedJunction:
     def __init__(self, junc_id: str|int, sim: Simulation, junc_params: dict|str=None) -> None:
-        self.junction_id = junc_id
+        self.id = junc_id
         self.position = traci.junction.getPosition(junc_id)
 
         self.sim = sim
-        self.sim_step_length = sim.step_length
-        self.init_time = sim.curr_step * sim.step_length
-        self.curr_time = sim.curr_step * sim.step_length
+        self.init_time = sim.curr_step
+        self.curr_time = sim.curr_step
         
         self.has_tl = junc_id in sim.all_tls
 
@@ -1062,29 +1170,22 @@ class Junction:
             self.avg_m_green, self.avg_m_red = [0 for _ in range(self.m_len)], [0 for _ in range(self.m_len)]
 
         if junc_params != None:
-            if not isinstance(junc_params, (dict, str)):
-                raise TypeError("(step {0}) Junc.init: Invalid junc_params (must be [dict|filepath (str)], not '{1}').".format(sim.curr_step, type(junc_params).__name__))
-            elif isinstance(junc_params, str) and junc_params.endswith(".json"):
-                if os.path.exists(junc_params):
-                    with open(junc_params, "r") as fp:
-                        junc_params = json.load(fp)
-                else: raise FileNotFoundError("(step {0}) Junc.init: Junction parameters file '{1}' not found.".format(sim.curr_step, junc_params))
-            elif isinstance(junc_params, str): raise ValueError("(step {0}) Junc.init: Invalid junction parameters file '{1}' (must be '.json' file).".format(sim.curr_step, junc_params))
+            junc_params = load_params(junc_params, "Junc.init", self.curr_time, "junc_params")
 
             self.track_flow = False
             if "flow_params" in junc_params.keys():
                 flow_params = junc_params["flow_params"]
                 if "inflow_detectors" in flow_params.keys() or "outflow_detectors" in flow_params.keys():
                     if not ("inflow_detectors" in flow_params.keys() and "outflow_detectors" in flow_params.keys()):
-                        raise KeyError("(step {0}) Junc.init: Both 'inflow_detectors' and 'outflow_detectors' are required parameters to track flow.".format(sim.curr_step))
+                        raise KeyError("(step {0}) TrackedJunction.init(): Both 'inflow_detectors' and 'outflow_detectors' are required parameters to track flow.".format(sim.curr_step))
                     else:
 
                         for detector_id in flow_params["inflow_detectors"]:
                             if detector_id not in self.sim.available_detectors.keys():
-                                raise KeyError("(step {0}) Junc.init: Unrecognised detector ID given in inflow_detectors ('{1}').".format(sim.curr_step, detector_id))
+                                raise KeyError("(step {0}) TrackedJunction.init(): Unrecognised detector ID given in inflow_detectors ('{1}').".format(sim.curr_step, detector_id))
                         for detector_id in flow_params["outflow_detectors"]:
                             if detector_id not in self.sim.available_detectors.keys():
-                                raise KeyError("(step {0}) Junc.init: Unrecognised detector ID given in outflow_detectors ('{1}').".format(sim.curr_step, detector_id))
+                                raise KeyError("(step {0}) TrackedJunction.init(): Unrecognised detector ID given in outflow_detectors ('{1}').".format(sim.curr_step, detector_id))
 
                         self.inflow_detectors = flow_params["inflow_detectors"]
                         self.outflow_detectors = flow_params["outflow_detectors"]
@@ -1092,7 +1193,7 @@ class Junction:
                     if "flow_vtypes" in flow_params.keys(): self.flow_vtypes = ["all"] + flow_params["flow_vtypes"]
                     else: self.flow_vtypes = ["all"]
 
-                    self.avg_horizon = int(60 / self.sim_step_length) if "avg_horizon" not in flow_params.keys() else int(flow_params["avg_horizon"])
+                    self.avg_horizon = int(60 / self.sim.step_length) if "avg_horizon" not in flow_params.keys() else int(flow_params["avg_horizon"])
                     
                     self.v_in, self.v_out = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
                     self.avg_inflow, self.avg_outflow = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
@@ -1108,22 +1209,44 @@ class Junction:
                 self.metering_rates = []
                 self.rate_times = []
 
-                if "queue_detector" in meter_params.keys():
-                    self.measure_queues, self.queue_lengths, self.queue_delays = True, [], []
-                    self.queue_detector = meter_params["queue_detector"]
+                self.measure_spillback = False
+                self.measure_queues = False
+                self.queue_detector = None
+                self.ramp_edges = None
 
-                    if self.sim.available_detectors[self.queue_detector] != "multientryexit":
-                        raise AssertionError("(step {0}) Junc.init: Only 'multientryexit' detectors can be used to find queue length (not '{1}').".format(self.sim.curr_step, self.sim.available_detectors[self.queue_detector]))
-                else: self.measure_queues = False
+                self.queue_lengths, self.queue_delays = [], []
+
+                if "ramp_edges" in meter_params.keys():
+                    self.ramp_edges = meter_params["ramp_edges"]
+
+                    for edge in self.ramp_edges:
+                        if edge not in self.sim.all_edges:
+                            raise KeyError("(step {0}) TrackedJunction.init(): Edge ID '{1}' not found.".format(self.sim.curr_step, edge))
+
+                    self.measure_spillback, self.spillback_vehs = True, []
+                    self.measure_queues, self.queue_detector = True, None
+                    self.curr_queuing = set([])
+
+                if not self.measure_queues:
+                    if "queue_detector" in meter_params.keys():
+                        self.measure_queues, self.queue_detector = True, meter_params["queue_detector"]
+
+                        if self.queue_detector not in self.sim.available_detectors.keys():
+                            raise KeyError("(step {0}) TrackedJunction.init(): Unrecognised detector ID given as queue_detector ('{1}').".format(self.sim.curr_step, self.queue_detector))
+                        elif self.sim.available_detectors[self.queue_detector]["type"] != "multientryexit":
+                            raise AssertionError("(step {0}) TrackedJunction.init(): Only 'multientryexit' detectors can be used to find queue length (not '{1}').".format(self.sim.curr_step, self.sim.available_detectors[self.queue_detector]["type"]))
+
+                if "init_rate" in meter_params.keys(): self.sim.set_tl_metering_rate(self.id, meter_params["init_rate"])
+                else: self.sim.set_tl_metering_rate(self.id, self.max_rate)
 
             else: self.is_meter = False
     
-    def __str__(self): return "<Junction: '{0}'>".format(self.junction_id)
+    def __str__(self): return "<TrackedJunction: '{0}'>".format(self.id)
 
     def get_curr_data(self) -> dict:
         """
         Returns the current state of junction data as a dictionary.
-        :return dict: Junction data dictionary
+        :return dict: TrackedJunction data dictionary
         """
 
         junc_dict = {"position": self.position, "init_time": self.init_time, "curr_time": self.curr_time}
@@ -1143,6 +1266,9 @@ class Junction:
                 junc_dict["meter"]["queue_lengths"] = self.queue_lengths
                 junc_dict["meter"]["queue_delays"] = self.queue_delays
 
+            if self.measure_spillback:
+                junc_dict["meter"]["spillback_vehs"] = self.spillback_vehs
+
             junc_dict["meter"]["min_rate"] = self.min_rate
             junc_dict["meter"]["max_rate"] = self.max_rate
 
@@ -1153,8 +1279,8 @@ class Junction:
         Resets junction data collection.
         """
         
-        self.init_time = self.curr_time = self.sim.curr_step * self.sim_step_length
-        self.curr_time = self.curr_time = self.sim.curr_step * self.sim_step_length
+        self.init_time = self.sim.curr_step
+        self.curr_time = self.sim.curr_step
 
         if self.has_tl:
             self.states = []
@@ -1175,22 +1301,25 @@ class Junction:
                 self.queue_lengths = []
                 self.queue_delays = []
 
+            if self.measure_spillback:
+                self.spillback_vehs = []
+
     def update(self) -> None:
         """
         Update junction flow and TL data for the current time step.
         """
 
-        self.curr_time = self.sim.curr_step * self.sim_step_length
+        self.curr_time = self.sim.curr_step
         
         if self.has_tl:
-            curr_state = traci.trafficlight.getRedYellowGreenState(self.junction_id)
+            curr_state = traci.trafficlight.getRedYellowGreenState(self.id)
             colours = [*curr_state]
             for idx, mc in enumerate(colours):
                 
                 if len(self.durations[idx]) == 0 or mc.upper() != self.durations[idx][-1][0]:
-                    self.durations[idx].append([mc.upper(), self.sim_step_length])
+                    self.durations[idx].append([mc.upper(), 1])
                 elif mc.upper() == self.durations[idx][-1][0]:
-                    self.durations[idx][-1][1] = self.durations[idx][-1][1] + self.sim_step_length
+                    self.durations[idx][-1][1] = self.durations[idx][-1][1] + 1
 
                 if mc.upper() == 'G':
                     m_green_durs = [val[1] for val in self.durations[idx] if val[0] == 'G']
@@ -1213,34 +1342,107 @@ class Junction:
                 new_v_in = [v_id for v_id in step_v_in if v_id not in self.v_in[vtype] and (vtype == "all" or v_id.startswith(vtype))]
                 self.v_in[vtype] += new_v_in
                 self.inflows[vtype].append(len(new_v_in))
-                self.avg_inflow[vtype].append((sum(self.inflows[vtype][-self.avg_horizon:]) / len(self.inflows[vtype][-self.avg_horizon:])) / self.sim_step_length)
+                self.avg_inflow[vtype].append((sum(self.inflows[vtype][-self.avg_horizon:]) / len(self.inflows[vtype][-self.avg_horizon:])) / self.sim.step_length)
 
             for vtype in self.flow_vtypes:
                 new_v_out = [v_id for v_id in step_v_out if v_id not in self.v_out[vtype] and (vtype == "all" or v_id.startswith(vtype))]
                 self.v_out[vtype] += new_v_out
                 self.outflows[vtype].append(len(new_v_out))
-                self.avg_outflow[vtype].append((sum(self.outflows[vtype][-self.avg_horizon:]) / len(self.outflows[vtype][-self.avg_horizon:])) / self.sim_step_length)
+                self.avg_outflow[vtype].append((sum(self.outflows[vtype][-self.avg_horizon:]) / len(self.outflows[vtype][-self.avg_horizon:])) / self.sim.step_length)
 
         if self.measure_queues:
-            self.queue_lengths.append(self.sim.get_last_step_detector_data(self.queue_detector, "veh_count"))
+
+            if self.ramp_edges != None:
+                queuing_vehicles = self.sim.get_last_step_geometry_vehicles(self.ramp_edges, flatten=True)
+                self.queue_lengths.append(len(queuing_vehicles))
+
+                num_stopped = len([veh_id for veh_id in queuing_vehicles if self.sim.vehicle_is_stopped(veh_id)])
+                self.queue_delays.append(num_stopped * self.sim.step_length)
             
-            all_vehicles = self.sim.get_last_step_detector_vehicles(self.queue_detector, flatten=True)
-            num_stopped = len([veh_id for veh_id in all_vehicles if self.sim.vehicle_is_stopped(veh_id)])
-            self.queue_delays.append(num_stopped * self.sim_step_length)
+            elif self.queue_detector != None:
+                queuing_vehicles = self.sim.get_last_step_detector_vehicles(self.queue_detector, flatten=True)
+                self.queue_lengths.append(len(queuing_vehicles))
 
-class Units(Enum):
-    METRIC = 1
-    IMPERIAL = 2
-    UK = 3
+                num_stopped = len([veh_id for veh_id in queuing_vehicles if self.sim.vehicle_is_stopped(veh_id)])
+                self.queue_delays.append(num_stopped * self.sim.step_length)
 
-def get_cumulative_arr(arr: list, start: int=0) -> list:
-    arr = [0] + arr
-    for i in range(start + 1, len(arr)):
-        arr[i] += arr[i - 1]
-    return arr[1:]
+            else: raise AssertionError("(step {0}) TrackedJunction.update(): Cannot update queue length (no detector or entry/exit edges)".format(self.sim.curr_step))
 
-def get_scenario_name(filepath: str) -> str:
-    cfg_file = filepath.split('/')[-1]
-    if cfg_file.endswith('.sumocfg'): cfg_file = cfg_file.removesuffix('.sumocfg')
-    elif cfg_file.endswith('.neteditcfg'): cfg_file = cfg_file.removesuffix('.neteditcfg')
-    return cfg_file
+        if self.measure_spillback:
+            spillback_vehs, all_waiting_vehs = 0, 0
+            all_loaded_vehicles = self.sim.all_loaded_vehicle_ids
+            for veh_id in all_loaded_vehicles:
+                if not self.sim.vehicle_departed(veh_id):
+                    if traci.vehicle.getRoute(veh_id)[0] == self.ramp_edges[0]:
+                        spillback_vehs += 1
+                    all_waiting_vehs += 1
+
+            self.spillback_vehs.append(spillback_vehs)
+
+class TrackedEdge:
+    def __init__(self, edge_id: str, simulation: Simulation) -> None:
+        self.id = edge_id
+        self.sim = simulation
+
+        self.init_time = self.sim.curr_step
+        self.curr_time = self.sim.curr_step
+
+        net_file = traci.simulation.getOption("net-file")
+        net = sumolib.net.readNet(net_file)
+        edge = net.getEdge(edge_id)
+
+        self.linestring = edge.getShape()
+        self.line = LineString(self.linestring)
+        self.length = self.line.length
+        
+        if self.sim.units in ['IMPERIAL']: self.length *= 0.0006213712
+
+        self.step_vehicles = []
+
+    def __str__(self): return "<TrackedEdge: '{0}'>".format(self.id)
+
+    def get_curr_data(self) -> dict:
+        """
+        Returns the current state of edge data as a dictionary.
+        :return dict: TrackedEdge data dictionary
+        """
+        edge_dict = {"linestring": self.linestring,
+                     "length": self.length,
+                     "step_vehicles": self.step_vehicles,
+                     "init_time": self.init_time,
+                     "curr_time": self.curr_time}
+        
+        return edge_dict
+
+    def reset(self) -> None:
+        """
+        Resets edge data collection.
+        """
+
+        self.init_time = self.sim.curr_step
+        self.curr_time = self.sim.curr_step
+
+        self.step_vehicles = []
+
+    def update(self) -> None:
+        
+        self.curr_time = self.sim.curr_step
+        last_step_vehs = self.sim.get_last_step_geometry_vehicles(self.id, flatten=True)
+
+        veh_data = []
+        for veh_id in last_step_vehs:
+            speed = self.sim.get_vehicle_vals(veh_id, "speed")
+            coors = self.sim.get_vehicle_vals(veh_id, "position")[:2]
+            x = self.get_distance_on_road(coors)
+            if self.sim.units in ['IMPERIAL']: x *= 0.0006213712
+            veh_data.append((x, speed))
+
+        self.step_vehicles.append(veh_data)
+            
+    def get_distance_on_road(self, veh_coors):
+        line = LineString(self.linestring)
+        p = Point(veh_coors)
+        p2 = line.interpolate(line.project(p))
+        x_val = line.line_locate_point(p2, False)
+        x_pct = x_val/line.length
+        return x_pct

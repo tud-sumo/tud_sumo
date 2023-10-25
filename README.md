@@ -1,32 +1,31 @@
 # TU Delft SUMO Wrapper
 
 <a href="https://github.com/calluume/tud_sumo" alt="GitHub">
-    <img src="https://img.shields.io/badge/v1.5.0-github?logo=github&labelColor=%236e5494&color=%23394049" /></a>
+    <img src="https://img.shields.io/badge/v1.6-github?logo=github&labelColor=%236e5494&color=%23394049" /></a>
 
-Python SUMO wrapper, using traci, written for the AIM Lab at TU Delft by Callum Evans. Install with [pip](https://pypi.org/project/tud-sumo/) or by downloading the most recent version from [GitHub](https://github.com/calluume/tud_sumo).
+Python SUMO wrapper, using traci, written for the AIM Lab at TU Delft by Callum Evans.
 
 ![Header - Delft](https://i.imgur.com/dYrHOPY.png)
 
 ## Updates
 
-This is version '1.5.1'. The changelog is:
+This is version '1.6'. The changelog is:
 
-  - Added scenario name, used when saving data/plotting/running multiple scenarios.
-  - Added `get_last_step_detector_data` and `get_interval_detector_data` to get data from detectors.
-  - Added better meter handling (junctions can now be tracked as a meter, with rate, queue length and delay automatically tracked when using `set_tl_metering_rate`)
-  - Added `plot_metering_rate` and `plot_meter_queue_length` for plotting metering data, and `plot_cumulative_curve` to Plotter.
-  - Added `vehicle_is_stopped` to test whether vehicles are currently stopped.
-  - Removed `all_vtypes`, vtypes now only gotten from SUMO files.
-  - Removed `toggle_vehicle_tracking`, now uses `get_individual_vehicle_data` parameter in `Sim.start`.
-  - Error messages now show current step.
-  - Fixed underflow error with cumulative arrays. 
-  - Fixed issue of sim_data storing empty lists when not tracking individual vehicles.
+  - Added VSL and RG controllers.
+  - Added VSL and RG plotting functions.
+  - Added tracked edges, similar to tracked junctions, used to plot space-time diagrams.
+  - Added space-time diagram function.
+  - Added RM, VSL, RG, event demonstration.
+  - Added ability for RM controllers to track spillback.
+  - Added `utils.py` file.
+  - `Simulation.available_detectors` stores all detector information (pos & type), not just type.
+  - Made error messages more consistent.
   
 Check changes and previous versions through the project's [GitHub repository](https://github.com/calluume/tud_sumo).
 
 ## Requirements 
 
-Python 3.10 or later is required. Dependencies are; `tqdm`, `matplotlib` and `traci`.
+Python 3.10 or later is required. Dependencies are; `tqdm`, `matplotlib`, `shapely`, `sumolib` and `traci`.
 
 ## Usage Examples
 

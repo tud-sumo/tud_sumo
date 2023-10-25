@@ -71,7 +71,7 @@ def sim_from_osm(scenario_name, useragent, query, road_level=-1, include_ped_inf
             query_str += """;(._;>;);out;"""
 
             bbox = True
-        else: raise TypeError("Scen.sim_from_osm: Invalid query (must be [str (query|filepath) | list (bbox)], not '"+type(query).__name__+"')")
+        else: raise TypeError("sim_from_osm(): Invalid query (must be [str (query|filepath) | list (bbox)], not '"+type(query).__name__+"')")
 
         data = { 'data': query_str }
         response = requests.post('https://overpass-api.de/api/interpreter', headers=headers, data=data)
@@ -79,7 +79,7 @@ def sim_from_osm(scenario_name, useragent, query, road_level=-1, include_ped_inf
     if not os.path.isdir(scenarios_location): os.makedirs(scenarios_location)
     if not os.path.isdir(scenarios_location+scenario_name): os.makedirs(scenarios_location+scenario_name)
     else:
-        if not overwrite_files: raise FileExistsError("Scen.sim_from_osm: Scenario file '{0}' already exists and cannot be overwritten.".format(scenario_name))
+        if not overwrite_files: raise FileExistsError("sim_from_osm(): Scenario file '{0}' already exists and cannot be overwritten.".format(scenario_name))
 
     sumocfg_file = scenarios_location+scenario_name+'/'+scenario_name+'.sumocfg'
     osm_file = scenarios_location+scenario_name+'/'+scenario_name+'.osm'
@@ -127,7 +127,7 @@ def sim_from_osm(scenario_name, useragent, query, road_level=-1, include_ped_inf
 
     return sumocfg_file
 
-def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_vehicles=True, vtype_id='cars', vtype_params={}, flow_key="flow", flow_params={}, scenarios_location='scenarios/', od_delimiter=',', overwrite_rou=True):
+def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_vehicles=True, vtype_props={'cars': 1}, vtype_params={}, flow_key="flow", flow_params={}, scenarios_location='scenarios/', od_delimiter=',', overwrite_rou=True):
     """
     Create simulation routes file and link to scenario '.sumocfg'. All demand/vtype data is appended to existing route files.
     :param scenario_name: Pre-existing scenario ID
@@ -139,11 +139,18 @@ def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_v
     :param vtype_params:  vType parameters (default values for 'cars' and 'bikes' added)
     """
 
-    if 'cars' not in vtype_params.keys(): vtype_params['cars'] = {'color': 'red'}
-    if 'bikes' not in vtype_params.keys(): vtype_params['bikes'] = {'length': '1.60', 'minGap': '0.5', 'vClass': 'bicycle', 'color': 'green'}
+    default_vtype_params = {'cars': {'color': 'red', 'guiShape': 'passenger', 'lcCooperative': '0.6'},
+                            'bikes': {'vClass': 'bicycle', 'color': 'green', 'guiShape': 'bicycle', 'length': '1.60', 'minGap': '0.5'},
+                            'lorries': {'vClass': 'trailer', 'color': 'blue', 'guiShape': 'truck/semitrailer', 'lcCooperative': '0.6'},
+                            'vans': {'vClass': 'delivery', 'color': 'orange', 'guiShape': 'delivery', 'lcCooperative': '0.6'},
+                            'motorcycles': {'vClass': 'motorcycle', 'color': 'yellow', 'guiShape': 'motorcycle', 'lcCooperative': '0.6'}}
     
-    if not isinstance(od_file, str) or not od_file.endswith('.csv'): raise ValueError("Scen.add_sim_demand: Invalid OD filename '{0}'".format(od_file))
-    elif not os.path.exists(od_file): raise FileNotFoundError("Scen.add_sim_demand: OD file '{0}' does not exist.".format(od_file))
+    for vtype_id in default_vtype_params.keys():
+        if vtype_id not in vtype_params.keys():
+            vtype_params[vtype_id] = default_vtype_params[vtype_id]
+    
+    if not isinstance(od_file, str) or not od_file.endswith('.csv'): raise ValueError("add_sim_demand(): Invalid OD filename '{0}'".format(od_file))
+    elif not os.path.exists(od_file): raise FileNotFoundError("add_sim_demand(): OD file '{0}' does not exist.".format(od_file))
 
     demand_file = scenarios_location+scenario_name+'/'+scenario_name+'.rou.xml'
     if not os.path.exists(demand_file) or overwrite_rou:
@@ -154,19 +161,20 @@ def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_v
     demand_tree = ET.parse(demand_file)
     root = demand_tree.getroot()
 
-    add_vtype = False
-    if 'vType' not in [elem.tag for elem in root.iter()]: add_vtype = True
-    else:
-        curr_vtypes = [f_vtype.attrib['id'] for f_vtype in root.iter('vType')]
-        if vtype_id not in curr_vtypes: add_vtype = True
+    for vtype_id in vtype_props.keys():
+        add_vtype = False
+        if 'vType' not in [elem.tag for elem in root.iter()]: add_vtype = True
+        else:
+            curr_vtypes = [f_vtype.attrib['id'] for f_vtype in root.iter('vType')]
+            if vtype_id not in curr_vtypes: add_vtype = True
 
-    if add_vtype:
-        vtype = ET.Element('vType')
-        vtype.set('id', vtype_id)
-        if vtype_id in vtype_params.keys():
-            for attrib, val in vtype_params[vtype_id].items():
-                vtype.set(attrib, val)
-        root.append(vtype)
+        if add_vtype:
+            vtype = ET.Element('vType')
+            vtype.set('id', vtype_id)
+            if vtype_id in vtype_params.keys():
+                for attrib, val in vtype_params[vtype_id].items():
+                    vtype.set(attrib, val)
+            root.append(vtype)
 
     with open(od_file, 'r') as f:
         od_reader = csv.reader(f, delimiter=od_delimiter)
@@ -187,20 +195,25 @@ def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_v
                 a = row[0]
                 for i, b in enumerate(locs):
                     if int(row[1 + i]) != 0 and a != b:
-                        flow = ET.Element('flow')
-                        flow.set('id', flow_key+'_'+str(flow_id))
-                        flow.set('type', vtype_id)
-                        flow.set('begin', str(float(start_time)))
-                        flow.set('from', str(a))
-                        flow.set('to', str(b))
-                        flow.set('end', str(float(end_time)))
-                        if num_vehicles: flow.set('number', row[1 + i])
-                        else: flow.set('vehsPerHour', row[1 + i])
-                        for key, val in flow_params.items(): flow.set(key, val)
+                        for vtype_id, prop in vtype_props.items():
+                            key = flow_key if len(vtype_props) == 1 else flow_key+"_"+vtype_id
+                            flow = ET.Element('flow')
+                            flow.set('id', flow_key+'_'+str(flow_id))
+                            flow.set('type', vtype_id)
+                            flow.set('begin', str(float(start_time)))
+                            flow.set('from', str(a))
+                            flow.set('to', str(b))
+                            flow.set('end', str(float(end_time)))
 
-                        flow_id += 1
+                            veh_num = int(float(row[i + 1]) * prop)
+                            if num_vehicles: flow.set('number', str(veh_num))
+                            else: flow.set('vehsPerHour', str(veh_num))
 
-                        root.append(flow)
+                            for key, val in flow_params.items(): flow.set(key, val)
+
+                            flow_id += 1
+
+                            root.append(flow)
 
     ET.indent(demand_tree, space="    ")
     demand_tree.write(demand_file)
@@ -215,3 +228,34 @@ def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_v
 
             ET.indent(sumocfg_tree, space="    ")
             sumocfg_tree.write(scenarios_location+scenario_name+'/'+scenario_name+'.sumocfg')
+
+"""
+if __name__ == "__main__":
+    from simulation import Simulation
+    from plot import Plotter
+
+    scenario = "rm"
+    oostpoortweg_bbox = (52.016391, 52.005584, 4.384520, 4.372051)
+    rotterdam_a20_bbox = (51.942651117925664, 51.94050109308096, 4.486550937580756, 4.473877785934567)
+    
+    netconvert_args =  ["--roundabouts.guess", "--ramps.guess", "--tls.guess-signals", "--tls.discard-simple", "--tls.join"]
+
+    #cfg_file = sim_from_osm(scenario, "tud_sumo/c.evans@tudelft.nl", oostpoortweg_bbox, scenarios_location="../dev/scenarios/", sumocfg_vals={'step-length': 0.5, "lateral-resolution": 1.2}, netconvert_args=netconvert_args)
+    #add_sim_demand(scenario, '../dev/scenarios/rm/rm.csv', od_delimiter=';', scenarios_location="../dev/scenarios/", flow_params={"departLane": "best", "departSpeed": "max"})
+
+    scenario = "a20"
+    a20_box = [51.950100, 51.921227, 4.524580, 4.375938]
+
+    #cfg_file = sim_from_osm(scenario, "tud_sumo/c.evans@tudelft.nl", a20_box, road_level=4, scenarios_location="../dev/scenarios/", sumocfg_vals={'step-length': 0.5, "lateral-resolution": 1.2}, netconvert_args=netconvert_args)
+    #add_sim_demand('a20', '../dev/scenarios/a20/a20_od.csv', od_delimiter=';', vtype_props={'cars': 0.75, 'vans': 0.18, 'lorries': 0.05, 'motorcycles': 0.01}, scenarios_location="../dev/scenarios/", flow_key="base", overwrite_rou=True, flow_params={"departLane": "best", "departSpeed": "max"})
+    
+    
+    sim = Simulation()
+    sim.start('../dev/scenarios/a20/a20.sumocfg', gui=True)
+    done = False
+    while sim.curr_step < 500:
+        sim_data = sim.step_through()
+
+    sim.save_data("test.json")
+    sim.end()
+"""
