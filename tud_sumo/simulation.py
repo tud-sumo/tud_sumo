@@ -50,6 +50,8 @@ class Simulation:
 
         self.controllers = {}
 
+        self.units = Units(1)
+
     def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, cmd_options: list|None = None, units: int = 1, get_individual_vehicle_data: bool = True, suppress_warnings: bool = False, ignore_TraCI_err: bool = False, gui: bool = False) -> None:
         """
         Intialises SUMO simulation.
@@ -136,7 +138,7 @@ class Simulation:
             else: raise TypeError("(step {0}) Simulation.start_junc_tracking(): Invalid junc_params (must be [str|list|dict], not '{1}').".format(self.curr_step, type(juncs).__name__))
 
             if len(set(all_juncs).intersection(set(junc_ids))) != len(junc_ids):
-                raise KeyError("(step {0}) Simulation.start_junc_tracking(): Junction ID not found.".format(self.curr_step))
+                raise KeyError("(step {0}) Simulation.start_junc_tracking(): Junction ID(s) not found ('{1}').".format(self.curr_step, "', '".join(set(junc_ids) - set(all_juncs))))
             else: track_list = junc_ids
 
         self.all_juncs, self.all_tls = all_juncs, all_tls

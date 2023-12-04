@@ -229,10 +229,31 @@ def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_v
             ET.indent(sumocfg_tree, space="    ")
             sumocfg_tree.write(scenarios_location+scenario_name+'/'+scenario_name+'.sumocfg')
 
-"""
 if __name__ == "__main__":
     from simulation import Simulation
     from plot import Plotter
+
+
+    scenario = "ex"
+    fpath = "../../ex/"
+
+    add_sim_demand(scenario, "../../ex/offpeak_1.csv", od_delimiter=';', vtype_props={'cars': 0.75, 'vans': 0.18, 'lorries': 0.05, 'motorcycles': 0.01}, scenarios_location="../../", flow_key="base", overwrite_rou=True, flow_params={"departLane": "best", "departSpeed": "max"}, num_vehicles=False)
+    add_sim_demand(scenario, "../../ex/peak.csv", od_delimiter=';', vtype_props={'cars': 0.75, 'vans': 0.18, 'lorries': 0.05, 'motorcycles': 0.01}, scenarios_location="../../", flow_key="base", overwrite_rou=False, flow_params={"departLane": "best", "departSpeed": "max"}, num_vehicles=False)
+    add_sim_demand(scenario, "../../ex/offpeak_2.csv", od_delimiter=';', vtype_props={'cars': 0.75, 'vans': 0.18, 'lorries': 0.05, 'motorcycles': 0.01}, scenarios_location="../../", flow_key="base", overwrite_rou=False, flow_params={"departLane": "best", "departSpeed": "max"}, num_vehicles=False)
+
+    sim = Simulation()
+    sim.start('../../ex/ex.sumocfg', gui=True)
+    done = False
+    while sim.curr_step < 4000:
+        sim_data = sim.step_through()
+
+    #sim.save_data("test.json")
+    sim.end()
+
+    exit()
+
+
+
 
     scenario = "rm"
     oostpoortweg_bbox = (52.016391, 52.005584, 4.384520, 4.372051)
@@ -243,19 +264,18 @@ if __name__ == "__main__":
     #cfg_file = sim_from_osm(scenario, "tud_sumo/c.evans@tudelft.nl", oostpoortweg_bbox, scenarios_location="../dev/scenarios/", sumocfg_vals={'step-length': 0.5, "lateral-resolution": 1.2}, netconvert_args=netconvert_args)
     #add_sim_demand(scenario, '../dev/scenarios/rm/rm.csv', od_delimiter=';', scenarios_location="../dev/scenarios/", flow_params={"departLane": "best", "departSpeed": "max"})
 
-    scenario = "a20"
+    scenario = "oostpoortweg"
     a20_box = [51.950100, 51.921227, 4.524580, 4.375938]
-
+    
     #cfg_file = sim_from_osm(scenario, "tud_sumo/c.evans@tudelft.nl", a20_box, road_level=4, scenarios_location="../dev/scenarios/", sumocfg_vals={'step-length': 0.5, "lateral-resolution": 1.2}, netconvert_args=netconvert_args)
-    #add_sim_demand('a20', '../dev/scenarios/a20/a20_od.csv', od_delimiter=';', vtype_props={'cars': 0.75, 'vans': 0.18, 'lorries': 0.05, 'motorcycles': 0.01}, scenarios_location="../dev/scenarios/", flow_key="base", overwrite_rou=True, flow_params={"departLane": "best", "departSpeed": "max"})
+    #add_sim_demand('oostpoortweg', '../dev/scenarios/oostpoortweg/oostpoortweg_od.csv', od_delimiter=';', vtype_props={'cars': 0.75, 'vans': 0.18, 'lorries': 0.05, 'motorcycles': 0.01}, scenarios_location="../dev/scenarios/", flow_key="base", overwrite_rou=True, flow_params={"departLane": "best", "departSpeed": "max"})
     
     
     sim = Simulation()
-    sim.start('../dev/scenarios/a20/a20.sumocfg', gui=True)
+    sim.start('../dev/scenarios/oostpoortweg/oostpoortweg.sumocfg', gui=True)
     done = False
-    while sim.curr_step < 500:
+    while sim.curr_step < 4000:
         sim_data = sim.step_through()
 
-    sim.save_data("test.json")
+    #sim.save_data("test.json")
     sim.end()
-"""

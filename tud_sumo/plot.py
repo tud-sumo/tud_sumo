@@ -68,6 +68,9 @@ class Plotter:
 
         if self.simulation != None:
 
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
+
             if junc_id in self.simulation.tracked_juncs.keys(): tl = self.simulation.tracked_juncs[junc_id]
             else: raise KeyError("Plotter.plot_junc_flows(): Junction '{0}' not found in tracked junctions.".format(junc_id))
 
@@ -136,6 +139,9 @@ class Plotter:
         plt_colour = {"G": "green", "Y": "yellow", "R": "red"}
 
         if self.simulation != None:
+
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
 
             if tl_id in self.simulation.tracked_juncs.keys(): tl = self.simulation.tracked_juncs[tl_id]
             else: raise KeyError("Plotter.plot_tl_colours(): Junction '{0}' not found in tracked junctions.".format(tl_id))
@@ -268,6 +274,9 @@ class Plotter:
 
         if self.simulation != None:
 
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
+
             if tl_id in self.simulation.tracked_juncs.keys(): tl = self.simulation.tracked_juncs[tl_id]
             else: raise KeyError("Plotter.plot_metering_rate(): Junction '{0}' not found in tracked junctions.".format(tl_id))
 
@@ -335,6 +344,9 @@ class Plotter:
         
         self.spillback_vehs = None
         if self.simulation != None:
+
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
 
             if tl_id in self.simulation.tracked_juncs.keys(): tl = self.simulation.tracked_juncs[tl_id]
             else: raise KeyError("Plotter.plot_meter_queue_length(): Junction '{0}' not found in tracked junctions.".format(tl_id))
@@ -407,6 +419,10 @@ class Plotter:
         :param save_fig: Output image filename, will show image if not given
         """
 
+        if self.simulation != None:
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
+
         if isinstance(dataset, str): # Sim data
             if dataset in self.sim_data["data"].keys(): data = self.sim_data["data"][dataset]
             else: raise KeyError("Plotter.plot_vehicle_detector_data(): Unrecognised dataset key '{0}'.".format(dataset))
@@ -452,6 +468,10 @@ class Plotter:
         :param save_fig: Output image filename, will show image if not given
         """
 
+        if self.simulation != None:
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
+
         no_vehicles = self.sim_data["data"]["vehicle"]["no_vehicles"]
         data_vals = get_cumulative_arr(no_vehicles) if cumulative else no_vehicles
         start, end, step = self.sim_data["start"], self.sim_data["end"], self.sim_data["step_len"]
@@ -490,6 +510,10 @@ class Plotter:
         :param fig_title: If given, will overwrite default title
         :param save_fig: Output image filename, will show image if not given
         """
+
+        if self.simulation != None:
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
 
         inflows, outflows = [], []
 
@@ -571,6 +595,10 @@ class Plotter:
         :param fig_title: If given, will overwrite default title
         :param save_fig: Output image filename, will show image if not given
         """
+
+        if self.simulation != None:
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
 
         if "controllers" not in self.sim_data["data"].keys():
             raise KeyError("Plotter.plot_vsl_data(): No controllers used during simulation.")
@@ -696,6 +724,10 @@ class Plotter:
         :param save_fig: Output image filename, will show image if not given
         """
 
+        if self.simulation != None:
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
+
         if "controllers" not in self.sim_data["data"].keys():
             raise KeyError("Plotter.plot_rg_data(): No controllers used during simulation.")
         elif rg_id not in self.sim_data["data"]["controllers"].keys():
@@ -754,6 +786,10 @@ class Plotter:
         :param fig_title: If given, will overwrite default title
         :param save_fig: Output image filename, will show image if not given
         """
+
+        if self.simulation != None:
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
 
         if "edges" not in self.sim_data["data"].keys():
             raise KeyError("Plotter.plot_space_time_diagram(): No edges tracked during the simulation.")
@@ -840,3 +876,16 @@ class Plotter:
             ax.axvline(event["end_time"] * self.sim_data["step_len"], color="red", alpha=0.4, linestyle='--')
 
             ax.text(event["start_time"] * self.sim_data["step_len"] + ((event["end_time"] - event["start_time"]) * self.sim_data["step_len"]/2), y_lim[1] * 0.9, event["id"], horizontalalignment='center', color="red")
+
+if __name__ == "__main__":
+
+    plotter = Plotter("controller_demo.json")
+    #plotter.plot_cumulative_curve(["cw_ramp_inflow", "cw_rm_downstream"], ["cw_rm_upstream"], 15)
+    plotter.plot_meter_queue_length("crooswijk_meter")
+
+    plotter.plot_space_time_diagram(['321901470', '126729982', '126730069', '126730059', '509506847'])
+    plotter.plot_vsl_data('vsl_0')
+    plotter.plot_rg_data('rg_0')
+    plotter.plot_metering_rate("crooswijk_meter")
+    
+    #3186 lines of code!

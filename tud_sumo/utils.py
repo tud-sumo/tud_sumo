@@ -63,7 +63,7 @@ def get_axis_lim(data_vals, end_buff = 0.05):
 
     for scale in [1000, 100, 10, 1]:
         if max_val >= scale:
-            return math.ceil((max_val * pct_buff) / scale) * scale
+            return math.ceil((max_val * pct_buff) / (scale / 5)) * (scale / 5)
         
     return max_val * pct_buff
 
