@@ -1,4 +1,4 @@
-import os, requests, csv, xml.etree.ElementTree as ET
+import os, requests, csv, math, xml.etree.ElementTree as ET
 
 tu_delft_bbox = (52.004668, 51.991784, 4.383724, 4.365496)
 all_delft_bbox = (52.024396, 51.981332, 4.398933, 4.305552)
@@ -127,27 +127,46 @@ def sim_from_osm(scenario_name, useragent, query, road_level=-1, include_ped_inf
 
     return sumocfg_file
 
-def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_vehicles=True, vtype_props={'cars': 1}, vtype_params={}, flow_key="flow", flow_params={}, scenarios_location='scenarios/', od_delimiter=',', overwrite_rou=True):
+def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, use_flow_vals=True, vtype_props={'cars': 1}, vtype_params={}, flow_key=None, flow_params={}, scenarios_location='scenarios/', od_delimiter=',', overwrite_rou=True):
     """
     Create simulation routes file and link to scenario '.sumocfg'. All demand/vtype data is appended to existing route files.
-    :param scenario_name: Pre-existing scenario ID
-    :param od_file:       Filepath to OD matrix (.csv)
-    :param start_time:    Demand profile start time
-    :param end_time:      Demand profile end time
-    :param num_vehicles:  Denotes whether to take OD values as total number of vehiclces or vehicles per hour
-    :param vtype_id:      Demand profile vehicle type (added as vType if unknown)
-    :param vtype_params:  vType parameters (default values for 'cars' and 'bikes' added)
+    :param scenario_name:      Pre-existing scenario ID
+    :param od_file:            Filepath to OD matrix (.csv)
+    :param start_time:         Demand profile start time (if not given, read from OD file)
+    :param end_time:           Demand profile end time (if not given, read from OD file)
+    :param use_flow_vals:      If true, OD vals are read as veh/hr, otherwise, OD vals are raw number of generated vehicles
+    :param vtype_props:        Vehicle type proportions, defaults to all passenger cars
+    :param vtype_params:       Dict containing vType parameter dictionary for each vType, and common params for all vTypes, e.g {'cars': {'color': 'blue'}, 'lcCooperative': '0.6'}
+    :param flow_key:           Flow key for resulting '.rou.xml' (if not given, generated from filename)
+    :param scenarios_location: Scenarios file location
+    :param od_delimiter:       OD file .csv delimiter character
+    :param overwrite_rou:      If true, any previous '.rou.xml' is overwritten, otherwise, flows are appended 
     """
 
-    default_vtype_params = {'cars': {'color': 'red', 'guiShape': 'passenger', 'lcCooperative': '0.6'},
-                            'bikes': {'vClass': 'bicycle', 'color': 'green', 'guiShape': 'bicycle', 'length': '1.60', 'minGap': '0.5'},
-                            'lorries': {'vClass': 'trailer', 'color': 'blue', 'guiShape': 'truck/semitrailer', 'lcCooperative': '0.6'},
-                            'vans': {'vClass': 'delivery', 'color': 'orange', 'guiShape': 'delivery', 'lcCooperative': '0.6'},
-                            'motorcycles': {'vClass': 'motorcycle', 'color': 'yellow', 'guiShape': 'motorcycle', 'lcCooperative': '0.6'}}
+    default_vtype_params = {'cars':                                {'color': 'red',    'guiShape': 'passenger'},
+                            'bikes':       {'vClass': 'bicycle',    'color': 'green',  'guiShape': 'bicycle', 'length': '1.60', 'minGap': '0.5'},
+                            'lorries':     {'vClass': 'trailer',    'color': 'blue',   'guiShape': 'truck/semitrailer'},
+                            'vans':        {'vClass': 'delivery',   'color': 'orange', 'guiShape': 'delivery'},
+                            'motorcycles': {'vClass': 'motorcycle', 'color': 'yellow', 'guiShape': 'motorcycle'}}
+
+    new_vtype_params, vtype_list = {}, list(vtype_props.keys())
+    common_params = {param_key: str(param_val) for param_key, param_val in vtype_params.items() if not isinstance(param_val, dict)}
+    ud_vtype_params = {param_key: param_val for param_key, param_val in vtype_params.items() if isinstance(param_val, dict)}
+    if len(ud_vtype_params) > 0:
+        for vtype_id, params in ud_vtype_params.items():
+            if vtype_id in vtype_list:
+                default_vtype_params[vtype_id] = params
+            else: raise KeyError("add_sim_demand(): vType ID '{0}' not found in vtype_props.".format(vtype_id))
+
+    if len(common_params) > 0:
+        for vtype_id in vtype_list:
+            if vtype_id in default_vtype_params.keys():
+
+                default_vtype_params[vtype_id].update(common_params)
+                new_vtype_params[vtype_id] = default_vtype_params[vtype_id]
+            else: raise KeyError("add_sim_demand(): No parameters found for vtypes: {0}.".format(list(set(vtype_props) - set(default_vtype_params))))
     
-    for vtype_id in default_vtype_params.keys():
-        if vtype_id not in vtype_params.keys():
-            vtype_params[vtype_id] = default_vtype_params[vtype_id]
+    vtype_params = new_vtype_params
     
     if not isinstance(od_file, str) or not od_file.endswith('.csv'): raise ValueError("add_sim_demand(): Invalid OD filename '{0}'".format(od_file))
     elif not os.path.exists(od_file): raise FileNotFoundError("add_sim_demand(): OD file '{0}' does not exist.".format(od_file))
@@ -189,13 +208,14 @@ def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_v
                     t_str = row[0]
                     params = t_str.split(' ')
                     for elem in params:
-                        if elem.startswith('s='): start_time = float(elem[2:])
-                        elif elem.startswith('e='): end_time = float(elem[2:])
+                        if elem.upper().startswith('S='): start_time = float(elem[2:])
+                        elif elem.upper().startswith('E='): end_time = float(elem[2:])
             else:
                 a = row[0]
                 for i, b in enumerate(locs):
                     if int(row[1 + i]) != 0 and a != b:
                         for vtype_id, prop in vtype_props.items():
+                            if flow_key == None: flow_key = od_file.split('/')[-1][:-4]
                             key = flow_key if len(vtype_props) == 1 else flow_key+"_"+vtype_id
                             flow = ET.Element('flow')
                             flow.set('id', flow_key+'_'+str(flow_id))
@@ -205,9 +225,9 @@ def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_v
                             flow.set('to', str(b))
                             flow.set('end', str(float(end_time)))
 
-                            veh_num = int(float(row[i + 1]) * prop)
-                            if num_vehicles: flow.set('number', str(veh_num))
-                            else: flow.set('vehsPerHour', str(veh_num))
+                            veh_num = math.ceil(float(row[i + 1]) * prop)
+                            if use_flow_vals: flow.set('vehsPerHour', str(veh_num))
+                            else: flow.set('number', str(veh_num))
 
                             for key, val in flow_params.items(): flow.set(key, val)
 
@@ -232,22 +252,43 @@ def add_sim_demand(scenario_name, od_file, start_time=None, end_time=None, num_v
 if __name__ == "__main__":
     from simulation import Simulation
     from plot import Plotter
+    import json
 
+    scenario = "ex_v2"
+    scenarios_location = "../dev/scenarios/"
+    scenario_filepath  = scenarios_location + scenario + '/'
+    description = "Testing no control with no bottleneck and lower peak demand, using lc coop=0.6, ass=5.0 and strat=5.0"
 
-    scenario = "ex"
-    fpath = "../../ex/"
+    #add_sim_demand(scenario, scenario_filepath+"base_flow.csv", od_delimiter=';', vtype_props={'cars': 0.7527, 'vans': 0.0834, 'lorries': 0.1034, 'motorcycles': 0.0604}, vtype_params={'lcCooperative': 0.6, 'lcAssertive': 5.0, 'lcStrategic': 5.0}, scenarios_location=scenarios_location, overwrite_rou=True, flow_params={"departLane": "best", "departSpeed": "max"}, use_flow_vals=True)
+    #add_sim_demand(scenario, scenario_filepath+"peak_flow.csv", od_delimiter=';', vtype_props={'cars': 0.7527, 'vans': 0.0834, 'lorries': 0.1034, 'motorcycles': 0.0604}, vtype_params={'lcCooperative': 0.6, 'lcAssertive': 5.0, 'lcStrategic': 5.0}, scenarios_location=scenarios_location, overwrite_rou=False, flow_params={"departLane": "best", "departSpeed": "max"}, use_flow_vals=True)
 
-    add_sim_demand(scenario, "../../ex/offpeak_1.csv", od_delimiter=';', vtype_props={'cars': 0.75, 'vans': 0.18, 'lorries': 0.05, 'motorcycles': 0.01}, scenarios_location="../../", flow_key="base", overwrite_rou=True, flow_params={"departLane": "best", "departSpeed": "max"}, num_vehicles=False)
-    add_sim_demand(scenario, "../../ex/peak.csv", od_delimiter=';', vtype_props={'cars': 0.75, 'vans': 0.18, 'lorries': 0.05, 'motorcycles': 0.01}, scenarios_location="../../", flow_key="base", overwrite_rou=False, flow_params={"departLane": "best", "departSpeed": "max"}, num_vehicles=False)
-    add_sim_demand(scenario, "../../ex/offpeak_2.csv", od_delimiter=';', vtype_props={'cars': 0.75, 'vans': 0.18, 'lorries': 0.05, 'motorcycles': 0.01}, scenarios_location="../../", flow_key="base", overwrite_rou=False, flow_params={"departLane": "best", "departSpeed": "max"}, num_vehicles=False)
+    sim = Simulation(scenario, description)
+    sim.start(scenario_filepath+scenario+'.sumocfg', get_individual_vehicle_data=False, gui=False)
 
-    sim = Simulation()
-    sim.start('../../ex/ex.sumocfg', gui=True)
-    done = False
-    while sim.curr_step < 4000:
-        sim_data = sim.step_through()
+    mainline_edges = ['E1_0', 'E1_1', 'E2_0', 'E2_1', 'E2_2', 'E3_0', 'E3_1', 'E3_2', 'E4', 'E5_0', 'E5_1', 'E5_2', 'E5_3']
+    sim.start_edge_tracking(mainline_edges)
 
-    #sim.save_data("test.json")
+    rm_params = {'RM_E7':  {'up_sec': 'E1_1', 'dn_sec': 'E2_0'},
+                 'RM_E15': {'up_sec': 'E2_2', 'dn_sec': 'E3_0'},
+                 'RM_E12': {'up_sec': 'E4',   'dn_sec': 'E5_0'}}
+
+    rm_locs, rms = ['E7', 'E15', 'E12'], {}
+    for rm_loc in rm_locs:
+        rm_id = "RM_" + rm_loc
+        up_ds = ["{0}_up_occ_{1}".format(rm_loc, num) for num in range(3)]
+        dn_ds = ["{0}_down_occ_{1}".format(rm_loc, num) for num in range(3)]
+        in_d = rm_loc + "_ramp_inflow"
+        q_det = rm_loc + "_ramp_queue"
+
+        sim.start_junc_tracking({rm_id: {'meter_params': {'min_rate': 200, 'max_rate': 2000, 'queue_detector': q_det},
+                                                          'flow_params': {'inflow_detectors': up_ds + [in_d], 'outflow_detectors': dn_ds}}})
+    
+    from tqdm import tqdm
+    pbar = tqdm(desc="Running sim (step {0}, {1} vehs)".format(sim.curr_step, len(sim.all_curr_vehicle_ids)), total=100)
+    while sim.curr_step < 100 and sim.is_running():
+        sim_data = sim.step_through(pbar=pbar)
+
+    sim.save_data("../dev/data/ex_v2/plt_test.json")
     sim.end()
 
     exit()

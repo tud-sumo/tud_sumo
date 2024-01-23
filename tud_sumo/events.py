@@ -89,17 +89,20 @@ class Event:
                 else: raise FileNotFoundError("(step {0}) Event.init(): Event parameters file '{1}' not found.".format(self.sim.curr_step, event_params))
             else: raise ValueError("(step {0}) Event.init(): Event junction parameters file '{1}' (must be '.json' file).".format(self.sim.curr_step, event_params))
 
-        if "start_time" in event_params.keys(): self.start_time = event_params["start_time"]
+        if "start_time" in event_params.keys(): self.start_time = event_params["start_time"] / self.sim.step_length
+        elif "start_step" in event_params.keys(): self.start_time = event_params["start_step"]
         else: raise KeyError("(step {0}) Event.init(): Event 'start_time' is not given and is required.".format(self.curr_step))
 
-        self.end_time = math.inf if "end_time" not in event_params.keys() else event_params["end_time"]
-
         if "end_time" in event_params.keys():
-            self.end_time = event_params["end_time"]
+            self.end_time = event_params["end_time"] / self.sim.step_length
+        elif "end_step" in event_params.keys():
+            self.end_time = event_params["end_step"]
+        elif "event_n_steps" in event_params.keys():
+            self.end_time = self.start_time + event_params["event_n_steps"]
         elif "event_duration" in event_params.keys():
-            self.end_time = self.start_time + event_params["event_duration"]
+            self.end_time = self.start_time + (event_params["event_duration"] / self.sim.step_length)
         else:
-            raise KeyError("(step {0}) Event.init(): Event 'end_time' and 'event_duration is not given and 1 is required.".format(self.curr_step))
+            self.end_time = math.inf
 
         if "edge" not in event_params.keys() and "vehicle" not in event_params.keys():
             raise KeyError("(step {0}) Event.init(): Neither 'edge' or 'vehicle' parameters are given and one or both is required.".format(self.curr_step))

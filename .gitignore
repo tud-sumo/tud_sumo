@@ -5,4 +5,5 @@ setup.py
 *.pyc
 *.pyo
 dev/*
-rm*.py
+tud_sumo/capacity_drop/*
+tud_sumo/ramp_metering/*

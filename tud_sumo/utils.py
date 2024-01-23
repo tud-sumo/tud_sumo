@@ -1,5 +1,6 @@
 import json, os, math, numpy as np
 from enum import Enum
+from datetime import datetime
 
 class Units(Enum):
     METRIC = 1
@@ -10,6 +11,31 @@ class Controller(Enum):
     VSL = 1
     RG = 2
     METER = 3
+
+def convert_time_units(time_vals, unit, step_len):
+    if not isinstance(time_vals, list): time_vals = [time_vals]
+    if unit == "steps": return time_vals
+    elif unit == "s" and step_len != None:
+        time_vals = [val * step_len for val in time_vals]
+    elif unit == "m" and step_len != None:
+        time_vals = [(val * step_len)/60 for val in time_vals]
+    elif unit == "hr" and step_len != None:
+        time_vals = [(val * step_len)/3600 for val in time_vals]
+
+    if len(time_vals) == 1: return time_vals[0]
+    else: return time_vals
+
+    
+
+def get_time_steps(data_vals, unit, step_len=None, start=0):
+    time_vals = list(range(len(data_vals)))
+    time_vals = [val + start for val in time_vals]
+
+    return convert_time_units(time_vals, unit, step_len)
+         
+def get_time_str():
+    date_str = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
+    return date_str
 
 def get_cumulative_arr(arr: list, start: int=0) -> list:
     arr = [0] + arr
@@ -66,6 +92,29 @@ def get_axis_lim(data_vals, end_buff = 0.05):
             return math.ceil((max_val * pct_buff) / (scale / 5)) * (scale / 5)
         
     return max_val * pct_buff
+
+def limit_vals_by_range(time_steps, data_vals=None, time_range=None):
+    """
+    For plotting, to limit data values between to those within a given time range.
+    :param time_steps: List of time step values
+    :param data_vals:  List of data values, same length as time_steps, (if not given, only time_steps is limited)
+    :param time_range: (1x2) array containing minimum and maximum time step values (if not given, data is returned unchanged)
+    :return (list):    Limited time_steps (& data_vals if given, where tuple returned is (vals, steps))
+    """
+
+    if time_range == None or (time_range[0] < time_steps[0] and time_range[1] > time_steps[-1]):
+        if data_vals != None: return time_steps, data_vals
+        else: return time_steps
+
+    if data_vals != None:
+        new_vals, new_steps = [], []
+        for val, step in zip(data_vals, time_steps):
+            if step >= time_range[0] and step <= time_range[1]:
+                new_vals.append(val)
+                new_steps.append(step)
+            elif step > time_range[1]:
+                return new_vals, new_steps
+    else: return [step for step in time_steps if step >= time_range[0] and step <= time_range[1]]
 
 def get_space_time_matrix(sim_data, edge_ids=None, x_resolution=1, y_resolution=10, upstream_at_top=True):
     """

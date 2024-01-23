@@ -1,5 +1,6 @@
 import os, sys, traci, sumolib, json, math
 from tqdm import tqdm
+from random import randint as rnd
 from copy import copy, deepcopy
 from events import EventScheduler, Event
 from controllers import VSLController, RGController
@@ -7,9 +8,10 @@ from shapely.geometry import LineString, Point
 from utils import *
 
 class Simulation:
-    def __init__(self, scenario_name: str|None = None) -> None:
+    def __init__(self, scenario_name: str|None = None, scenario_desc: str|None = None) -> None:
         """
         :param scenario_name: Scenario label saved to simulation object (defaults to name of '.sumocfg')
+        :param scenario_desc: Simulation scenario description, saved along with all files
         """
 
         path_tools = os.path.join(os.environ.get("SUMO_HOME"), 'tools')
@@ -18,6 +20,8 @@ class Simulation:
         else: sys.path.append(path_tools)
 
         self.scenario_name = scenario_name
+        self.scenario_desc = scenario_desc
+        self.seed = None
         self.running = False
         self.curr_step = 0
         self.gui = False
@@ -52,7 +56,7 @@ class Simulation:
 
         self.units = Units(1)
 
-    def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, cmd_options: list|None = None, units: int = 1, get_individual_vehicle_data: bool = True, suppress_warnings: bool = False, ignore_TraCI_err: bool = False, gui: bool = False) -> None:
+    def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, cmd_options: list|None = None, units: int = 1, get_individual_vehicle_data: bool = True, suppress_warnings: bool = False, ignore_TraCI_err: bool = False, seed: int|None = None, gui: bool = False) -> None:
         """
         Intialises SUMO simulation.
         :param config_file: Location of '.sumocfg' file (can be given instead of net_file)
@@ -64,6 +68,7 @@ class Simulation:
         :param get_individual_vehicle_data: Denotes whether to get individual vehicle data (set to False to improve performance)
         :param suppress_warnings: Suppress simulation warnings
         :param ignore_TraCI_err: If true and a fatal traCI error occurs, the simulation ends but the program continues to run
+        :param seed:        Either int to be used as seed, or random.random()/random.randint(), where a random seed is used
         :param gui:         Bool denoting whether to run GUI
         """
 
@@ -85,8 +90,17 @@ class Simulation:
         
         if cmd_options != None: sumoCMD += cmd_options
 
+        if isinstance(seed, int): sumoCMD += ["--seed", seed]
+        elif hasattr(seed, '__call__') and seed.__name__ in ['random', 'randint']:
+            sumoCMD += ["--random"]
+            self.seed = "random"
+        elif seed != None:
+            raise TypeError("(step {0}) Simulation.start(): Invalid seed type '{1}' (must be [int|random.randint()|random.random()]).".format(self.curr_step))
+        
+        self.seed = seed
+
         if units in [1, 2, 3]: self.units = Units(units)
-        else: raise ValueError("(step {0}) Plot.init: Invalid simulation units '{1}' (must be 1-3)".format(self.curr_step, units))
+        else: raise ValueError("(step {0}) Plot.init: Invalid simulation units '{1}' (must be 1-3).".format(self.curr_step, units))
 
         traci.start(sumoCMD)
         self.running = True
@@ -113,6 +127,8 @@ class Simulation:
 
         self.ignore_TraCI_err = ignore_TraCI_err
         self.suppress_warnings = suppress_warnings
+
+        self.sim_start_time = get_time_str()
         
     def start_junc_tracking(self, juncs: str|list|dict|None = None) -> None:
         """
@@ -184,10 +200,13 @@ class Simulation:
         Ends the simulation.
         """
 
-        traci.close()
+        try:
+            traci.close()
+        except traci.exceptions.FatalTraCIError:
+            print("(step {0}) (WARNING) Simulation.end(): TraCI is not connected.".format(self.curr_step))
         self.running = False
 
-    def save_data(self, filename: str|None = None, overwrite: bool = True) -> None:
+    def save_data(self, filename: str|None = None, overwrite: bool = True, json_indent: int|None = 4) -> None:
         """
         Save all vehicle, detector and junction data in a JSON file.
         :param filename:  Output filepath (defaults to ./'scenario_name'.json)
@@ -205,7 +224,7 @@ class Simulation:
         if self.all_data != None:
             if self.scheduler != None: self.all_data["data"]["events"] = self.scheduler.__dict__()
             with open(filename, "w") as fp:
-                json.dump(self.all_data, fp, indent=4)
+                json.dump(self.all_data, fp, indent=json_indent)
         else: raise AssertionError("(step {0}) Simulation.save_data(): No data to save as simulation has not been run.".format(self.curr_step))
 
     def start_edge_tracking(self, edge_list):
@@ -251,7 +270,7 @@ class Simulation:
 
         return self.controllers
 
-    def step_through(self, n_steps: int = 1, end_step: int|None = None, sim_dur: int|None = None, n_light_changes: int|None = None, detector_list: list|None = None, vTypes: list|None = None, keep_data: bool = True, append_data: bool = True, cumulative_data: bool = False) -> dict:
+    def step_through(self, n_steps: int = 1, end_step: int|None = None, sim_dur: int|None = None, n_light_changes: int|None = None, detector_list: list|None = None, vTypes: list|None = None, keep_data: bool = True, append_data: bool = True, cumulative_data: bool = False, pbar: tqdm|None = None) -> dict:
         """
         Step through simulation from the current time until end_step, aggregating data during this period.
         :param n_steps:         Perform n steps of the simulation (defaults to 1)
@@ -260,9 +279,10 @@ class Simulation:
         :param n_light_changes: Run for n light changes (across all junctions)
         :param detector_list:   List of detector IDs to collect data from (defaults to all)
         :param vTypes:          Vehicle type(s) to collect data of (list of types or string, defaults to all)
-        :param cumulative_data: Denotes whether to get cumulative veh count and TTS values
         :param keep_data:       Denotes whether to store data collected during this run (defaults to True)
         :param append_data:     Denotes whether to append simulation data to that of previous runs (defaults to True)
+        :param cumulative_data: Denotes whether to get cumulative veh count and TTS values
+        :param pbar:            tqdm progress bar updated by 1 with each step, used to 
         :return dict:           All data collected through the time period, separated by detector
         """
 
@@ -280,8 +300,14 @@ class Simulation:
         elif end_step == None: raise ValueError("(step {0}) Simulation.step_through(): No time value given.".format(self.curr_step))
 
         if prev_data == None:
-            prev_steps, all_data = 0, {"data": {}, "scenario_name": self.scenario_name, "step_len": self.step_length, "units": self.units.name, "start": start_time}
+            prev_steps, all_data = 0, {"scenario_name": self.scenario_name, "scenario_desc": "", "data": {}, "start": start_time, "end": self.curr_step, "step_len": self.step_length, "units": self.units.name, "seed": 0, "sim_start": self.sim_start_time, "sim_end": get_time_str()}
             
+            if self.scenario_desc == None: del all_data["scenario_desc"]
+            else: all_data["scenario_desc"] = self.scenario_desc
+
+            if self.seed == None: del all_data["seed"]
+            else: all_data["seed"] = self.seed
+
             if len(self.available_detectors) > 0: all_data["data"]["detector"] = {}
             if self.track_juncs: all_data["data"]["junctions"] = {}
             if len(self.tracked_edges) > 0: all_data["data"]["edges"] = {}
@@ -299,7 +325,9 @@ class Simulation:
                 prev_steps = prev_steps.pop()
                 all_data = prev_data
 
-        if not self.gui and n_steps > 1: pbar = tqdm(desc="Running simulation", total=end_step - self.curr_step)
+        if not isinstance(pbar, tqdm):
+            if not self.gui and n_steps > 1: pbar = tqdm(desc="Running sim (step {0}, {1} vehs)".format(self.curr_step, len(self.all_curr_vehicle_ids)), total=end_step - self.curr_step)
+
         while self.curr_step < end_step:
 
             try: last_step_data, all_v_data = self.step(detector_list, vTypes)
@@ -328,7 +356,9 @@ class Simulation:
             for data_key, data_val in last_step_data["vehicle"].items():
                 all_data["data"]["vehicle"][data_key].append(data_val)
 
-            if not self.gui and n_steps > 1: pbar.update(1)
+            if isinstance(pbar, tqdm):
+                pbar.update(1)
+                pbar.set_description("Running sim (step {0}, {1} vehs)".format(self.curr_step, len(self.all_curr_vehicle_ids)))
 
             if end_step == math.inf and n_light_changes != None:
                 if self.light_changes - init_changes >= n_light_changes: break
@@ -340,6 +370,7 @@ class Simulation:
             all_data["data"]["vehicle"]["tts"] = get_cumulative_arr(all_data["data"]["vehicle"]["tts"], prev_steps)
 
         all_data["end"] = self.curr_step
+        all_data["sim_end"] = get_time_str()
         if self.track_juncs: all_data["data"]["junctions"] = last_step_data["junctions"]
         if self.scheduler != None: all_data["data"]["events"] = self.scheduler.__dict__()
         for e_id, edge in self.tracked_edges.items(): all_data["data"]["edges"][e_id] = edge.get_curr_data()
