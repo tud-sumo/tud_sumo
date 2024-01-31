@@ -7,3 +7,4 @@ setup.py
 dev/*
 tud_sumo/capacity_drop/*
 tud_sumo/ramp_metering/*
+Wiki/*

@@ -1,27 +1,8 @@
 # TU Delft SUMO Wrapper
 
-<a href="https://github.com/calluume/tud_sumo" alt="GitHub">
-    <img src="https://img.shields.io/badge/v1.6-github?logo=github&labelColor=%236e5494&color=%23394049" /></a>
-
 Python SUMO wrapper, using traci, written for the AIM Lab at TU Delft by Callum Evans.
 
 ![Header - Delft](https://i.imgur.com/dYrHOPY.png)
-
-## Updates
-
-This is version '1.6'. The changelog is:
-
-  - Added VSL and RG controllers.
-  - Added VSL and RG plotting functions.
-  - Added tracked edges, similar to tracked junctions, used to plot space-time diagrams.
-  - Added space-time diagram function.
-  - Added RM, VSL, RG, event demonstration.
-  - Added ability for RM controllers to track spillback.
-  - Added `utils.py` file.
-  - `Simulation.available_detectors` stores all detector information (pos & type), not just type.
-  - Made error messages more consistent.
-  
-Check changes and previous versions through the project's [GitHub repository](https://github.com/calluume/tud_sumo).
 
 ## Requirements 
 

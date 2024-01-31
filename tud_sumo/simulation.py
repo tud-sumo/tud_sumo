@@ -631,11 +631,12 @@ class Simulation:
         
         self.set_phases(junc_phases, overwrite=False)
 
-    def set_tl_metering_rate(self, junction_id: str|int, flow_rate: int|float, min_red: int|float = 1, y_dur: int|float = 1, green_time: int|float = 1) -> dict:
+    def set_tl_metering_rate(self, junction_id: str|int, flow_rate: int|float, control_interval: int = 60, min_red: int|float = 1, y_dur: int|float = 1, green_time: int|float = 1) -> dict:
         """
         Set ramp metering rate by flow at a junction. Uses a one-car-per-green policy, with a default 1s green phase duration.
         :param junction_id: Junction ID
         :param flow_rate: On-ramp inflow (veh/hr)
+        :param control_interval: Ramp meter control interval (s) (cycle length // control_interval == 0)
         :param min_red: Minimum red duration (s)
         :param y_dur: Yellow phase duration (s)
         :param green_time: Green phase duration, defaults to 1s (s)
@@ -660,9 +661,12 @@ class Simulation:
             min_red = self.step_length
 
         if flow_rate > 0:
-
-            flow_pm = flow_rate / 60
-            cycle_length = 60 / flow_pm
+            # veh/s
+            flow_ps = flow_rate / 3600
+            # veh/control_interval
+            flow_pc = flow_ps * control_interval
+            
+            cycle_length = control_interval / flow_pc
 
             red_time = cycle_length - green_time - y_dur
             if red_time < min_red or red_time <= 0:

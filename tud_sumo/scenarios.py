@@ -255,7 +255,7 @@ if __name__ == "__main__":
     import json
 
     scenario = "ex_v2"
-    scenarios_location = "../dev/scenarios/"
+    scenarios_location = "../dev/sumo_scenarios/"
     scenario_filepath  = scenarios_location + scenario + '/'
     description = "Testing no control with no bottleneck and lower peak demand, using lc coop=0.6, ass=5.0 and strat=5.0"
 
@@ -313,7 +313,7 @@ if __name__ == "__main__":
     
     
     sim = Simulation()
-    sim.start('../dev/scenarios/oostpoortweg/oostpoortweg.sumocfg', gui=True)
+    sim.start('../dev/sumo_scenarios/oostpoortweg/oostpoortweg.sumocfg', gui=True)
     done = False
     while sim.curr_step < 4000:
         sim_data = sim.step_through()

@@ -6,11 +6,15 @@ from simulation import Simulation
 from utils import *
 
 default_labels = {"no_vehicles": "No. of Vehicles", "tts": "Total Time Spent (s)", "delay": "Delay (s)",
-                  "veh_counts": "No. of Vehicles", "occupancies": "Occupancy (%)",
+                  "veh_counts": "No. of Vehicles", "occupancies": "Occupancy (%)", "densities": "Density unit",
                   "sim_time": "Simulation Time"}
 
+default_titles = {"no_vehicles": "Number of Vehicles", "tts": "Total Time Spent", "delay": "Delay",
+                  "veh_counts": "Number of Vehicles", "occupancies": "Vehicle Occupancies", "densities": "Vehicle Density",
+                  "speeds": "Average Speed", "limits": "Speed Limit"}
+
 class Plotter:
-    def __init__(self, simulation, sim_label=None, sim_time_units="s", fig_save_loc="", overwrite_figs=True):
+    def __init__(self, simulation: Simulation|str, sim_label: str|None=None, sim_time_units: str="s", fig_save_loc: str="", overwrite_figs: bool=True) -> None:
         """
         :param simulation:     Either simulation object, sim_data dict or sim_data filepath
         :param sim_label:      Simulation or scenario label added to the beginning of all plot titles
@@ -69,7 +73,7 @@ class Plotter:
             if not os.path.exists(self.fig_save_loc):
                 raise FileNotFoundError("Plotter.init(): File path '{0}' does not exist.".format(self.fig_save_loc))
 
-    def display_figure(self, filename=None):
+    def display_figure(self, filename: str|None=None) -> None:
 
         if filename is None: plt.show()
         else:
@@ -83,11 +87,11 @@ class Plotter:
             
             plt.savefig(fp, dpi=600)
         
-    def plot_junc_flows(self, junc_id, vtypes=None, plot_n_vehicles=False, plot_all=True, save_fig=None):
+    def plot_junc_flows(self, junc_id: str, vtypes: list|tuple|None=None, plot_n_vehicles: bool=False, plot_all: bool=True, save_fig: str|None=None) -> None:
         """
         Plot junction flow, either as inflow & outflow or number of vehicles at the intersection.
-        :param junc_id: Junction ID
-        :param vtypes: vType flows
+        :param junc_id:  Junction ID
+        :param vtypes:   vType flows
         :param plot_n_vehicles: If true, plot number of vehicles in the intersection, else inflow and outflow
         :param plot_all: If true, plot total values as well as vType data
         :param save_fig: Output image filename, will show image if not given
@@ -151,14 +155,14 @@ class Plotter:
 
         self.display_figure(save_fig)
     
-    def plot_tl_colours(self, tl_id, plt_movements=None, time_range=None, plot_percent=False, save_fig=None):
+    def plot_tl_colours(self, tl_id: str, plt_movements: list|tuple|None=None, time_range: list|tuple|None=None, plot_percent: bool=False, save_fig: str|None=None) -> None:
         """
         Plot traffic light sequence, as colours or green/red/yellow durations as a percent of time.
-        :param tl_id: Traffic light ID
+        :param tl_id:         Traffic light ID
         :param plt_movements: List of movements to plot by index (defaults to all)
-        :param time_range: Time range to plot
-        :param plot_percent: Denotes whether to plot colours as percent of time
-        :param save_fig: Output image filename, will show image if not given
+        :param time_range:    Time range to plot
+        :param plot_percent:  Denotes whether to plot colours as percent of time
+        :param save_fig:      Output image filename, will show image if not given
         """
 
         plt_colour = {"G": "green", "Y": "yellow", "R": "red"}
@@ -287,71 +291,18 @@ class Plotter:
         
         self.display_figure(save_fig)
 
-    def plot_metering_rates(self, rm_ids, plot_queues=False, time_range=None, show_events=True, fig_title=None, save_fig=None):
-        
-        if not isinstance(rm_ids, (tuple, list)): rm_ids = [rm_ids]
-        if len(rm_ids) == 1:
-            if plot_queues:
-                fig, axes = plt.subplots(1, 2)
-
-                self.plot_metering_rate(rm_ids[0], ax=axes[0], time_range=time_range, show_events=show_events, fig_title="Metering Rate", save_fig=save_fig)
-
-                self.plot_meter_queue_length(rm_ids[0], ax=axes[1], time_range=time_range, fig_title="Queue Length & Delay", ax_labels=True)
-
-                fig_title = "{0}'{1}' Metering Rate and Queues".format(self.sim_label, rm_ids[0]) if not isinstance(fig_title, str) else fig_title
-                fig.suptitle(fig_title)
-
-            else:
-                self.plot_metering_rate(rm_ids[0], time_range=time_range, show_events=show_events, fig_title=fig_title, save_fig=save_fig)
-                return
-
-        else:
-
-            if plot_queues: fig, (r_axes, q_axes) = plt.subplots(2, len(rm_ids))
-            else: fig, r_axes = plt.subplots(1, len(rm_ids))
-        
-            for idx, (rm_id, r_ax) in enumerate(zip(rm_ids, r_axes)):
-                self.plot_metering_rate(rm_id, ax=r_ax, time_range=time_range, show_events=show_events, fig_title=rm_id, ax_labels=False, save_fig=save_fig)
-
-                if idx == math.floor(len(rm_ids) / 2):
-                    r_ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.14), fancybox=True, ncol=2)
-            
-            r_axes[0].set_ylabel("Metering Rate (veh/hr)")
-
-            if plot_queues:
-                lens, dels = [], []
-                for rm_id in rm_ids:
-                    lens += self.sim_data["data"]["junctions"][rm_id]["meter"]["queue_lengths"]
-                    dels += get_cumulative_arr(self.sim_data["data"]["junctions"][rm_id]["meter"]["queue_delays"])
-
-                q_ylim, d_ylim = get_axis_lim(lens), get_axis_lim(dels)
-
-                for idx, (rm_id, q_ax) in enumerate(zip(rm_ids, q_axes)):
-                    self.plot_meter_queue_length(rm_id, time_range=time_range, ax=q_ax, fig_title="", ax_labels=False, q_ylim=q_ylim, d_ylim=d_ylim)
-
-                    box = q_ax.get_position()
-                    q_ax.set_position([box.x0, box.y0 - box.height * 0.08,
-                                    box.width, box.height * 0.92])
-
-                q_axes[0].set_ylabel("Number of Vehicles", color='tab:blue')
-                q_axes[-1].yaxis.set_label_position("right")
-                q_axes[-1].set_ylabel("Queue Delay (x$\mathregular{10^3}$s)", color='tab:red', labelpad=25)
-
-            if not isinstance(fig_title, str):
-                fig_title = "{0}Metering Rates".format(self.sim_label)
-                if plot_queues: fig_title += " and Queues"
-
-            if fig_title != "": fig.suptitle(fig_title)
-
-        self.display_figure(save_fig)
-
-    def plot_metering_rate(self, rm_id, ax=None, time_range=None, show_events=True, fig_title=None, ax_labels=True, save_fig=None):
+    def plot_rm_rate(self, rm_id: str, ax=None, yax_labels: bool=True, xax_labels: bool=True, time_range: list|tuple|None=None, show_legend: bool=True, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
-        Plot metering rate.
-        :param rm_id: Meter (traffic light) ID
-        :param show_events: Bool denoting whether to plot when events occur
-        :param fig_title: If given, will overwrite default title
-        :param save_fig: Output image filename, will show image if not given
+        Plot ramp metering rate.
+        :param rm_id:       Ramp meter junction ID
+        :param ax:          Matplotlib axis, used when creating subplots
+        :param yax_labels:  Bool denoting whether to include y-axis labels (for subplots)
+        :param xax_labels:  Bool denoting whether to include x-axis labels (for subplots)
+        :param time_range:  Plotting time range (in plotter class units)
+        :param show_legend: Bool denoting whether to show figure legend
+        :param show_events: Bool denoting whether to plot events on all axes
+        :param fig_title:   If given, will overwrite default title
+        :param save_fig:    Output image filename, will show image if not givenr
         """
 
         if self.simulation != None:
@@ -360,13 +311,13 @@ class Plotter:
             self.units = self.simulation.units.name
 
             if rm_id in self.simulation.tracked_juncs.keys(): tl = self.simulation.tracked_juncs[rm_id]
-            else: raise KeyError("Plotter.plot_metering_rate(): Junction '{0}' not found in tracked junctions.".format(rm_id))
+            else: raise KeyError("Plotter.plot_rm_rate(): Junction '{0}' not found in tracked junctions.".format(rm_id))
 
             if tl.is_meter:
                 rates = tl.metering_rates
                 times = tl.rate_times
                 min_r, max_r = tl.min_rate, tl.max_rate
-            else: raise ValueError("Plotter.plot_metering_rate(): Junction '{0}' is not tracked as a meter.".format(rm_id))
+            else: raise ValueError("Plotter.plot_rm_rate(): Junction '{0}' is not tracked as a meter.".format(rm_id))
 
         elif "junctions" in self.sim_data["data"].keys() and rm_id in self.sim_data["data"]["junctions"].keys():
             if "meter" in self.sim_data["data"]["junctions"][rm_id].keys():
@@ -374,11 +325,15 @@ class Plotter:
                 times = self.sim_data["data"]["junctions"][rm_id]["meter"]["rate_times"]
                 min_r, max_r = self.sim_data["data"]["junctions"][rm_id]["meter"]["min_rate"], self.sim_data["data"]["junctions"][rm_id]["meter"]["max_rate"]
 
-            else: raise ValueError("Plotter.plot_metering_rate(): Junction '{0}' is not tracked as a meter.".format(rm_id))
-        else: raise KeyError("Plotter.plot_metering_rate(): Junction '{0}' not found in tracked junctions.".format(rm_id))
+            else: raise ValueError("Plotter.plot_rm_rate(): Junction '{0}' is not tracked as a meter.".format(rm_id))
+        else: raise KeyError("Plotter.plot_rm_rate(): Junction '{0}' not found in tracked junctions.".format(rm_id))
 
         start, end, step = self.sim_data["start"], self.sim_data["end"], self.sim_data["step_len"]
-        
+
+        start = convert_time_units(start, self.sim_time_units, step)
+        end = convert_time_units(end, self.sim_time_units, step)
+        times = convert_time_units(times, self.sim_time_units, step)
+
         is_subplot = ax != None
         if not is_subplot: fig, ax = plt.subplots(1, 1)
         
@@ -387,48 +342,54 @@ class Plotter:
         for idx, val in enumerate(rates):
             if prev != None:
                 
-                line_start, line_end = times[int(idx - 1)] * step, times[idx] * step
+                line_start, line_end = times[int(idx - 1)], times[idx]
                 if time_range != None:
                     if line_start >= time_range[1] or line_end <= time_range[0]: continue
                     else: line_start, line_end = max(line_start, time_range[0]), min(line_end, time_range[1])
 
-                # Horizontal Line
                 ax.plot([line_start, line_end], [prev, prev], label=label, color=colour, linewidth=1.5, zorder=3)
                 
                 # Vertical Line
-                if time_range == None or (times[idx] * step > time_range[0] and times[idx] * step < time_range[1]):
-                    ax.plot([times[idx] * step, times[idx] * step], [prev, val], color=colour, linewidth=1.5, zorder=3)
+                if time_range == None or (times[idx] > time_range[0] and times[idx] < time_range[1]):
+                    ax.plot([times[idx], times[idx]], [prev, val], color=colour, linewidth=1.5, zorder=3)
                 label = None
 
             prev = val
 
         if label != None: ax.plot([-1, -2], [-1, -2], label=label, color=colour, linewidth=1.5, zorder=3)
 
-        last_line = [times[-1] * step, end * step]
+        last_line = [times[-1], end]
         if time_range != None:
             if last_line[0] >= time_range[1] or last_line[1] <= time_range[0]: last_line = None
             else: last_line[0], last_line[1] = max(last_line[0], time_range[0]), min(last_line[1], time_range[1])
         
         if last_line != None: ax.plot(last_line, [rates[-1], rates[-1]], color=colour, linewidth=1.5, zorder=3)
 
-        xlim = [start * step, end * step]
+        xlim = [start, end]
         if time_range != None:
             xlim[0], xlim[1] = max(xlim[0], time_range[0]), min(xlim[1], time_range[1])
         ax.set_xlim(xlim)
         ax.set_ylim([0, get_axis_lim(max_r)])
-        ax.axhline(max_r, label="Minimum / Maximum Rate", color="green", linestyle="--", alpha=0.5, zorder=1)
+        ax.axhline(max_r, label="Min/Max Rate", color="green", linestyle="--", alpha=0.5, zorder=1)
         ax.axhline(min_r, color="green", linestyle="--", alpha=0.5, zorder=2)
         ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
-        if ax_labels: ax.set_ylabel("Metering Rate (veh/hr)")
-        ax.set_xlabel(default_labels["sim_time"])
+        if yax_labels: ax.set_ylabel("Metering Rate (veh/hr)")
+        if xax_labels: ax.set_xlabel(default_labels["sim_time"])
         fig_title = "{0}'{1}' Metering Rate".format(self.sim_label, rm_id) if not isinstance(fig_title, str) else fig_title
-        ax.set_title(fig_title, pad=20)
-        if not is_subplot:
+        if fig_title != "": ax.set_title(fig_title, pad=20)
+
+        if show_legend:
             box = ax.get_position()
-            ax.set_position([box.x0, box.y0 + box.height * 0.08,
-                            box.width, box.height * 0.92])
-            ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.13),
-                      fancybox=True, ncol=2)
+            if not is_subplot:
+                ax.set_position([box.x0, box.y0 + box.height * 0.08,
+                                box.width, box.height * 0.92])
+                ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.13),
+                        fancybox=True, ncol=2)
+            else:
+                ax.set_position([box.x0, box.y0 + box.height * 0.02,
+                                box.width, box.height * 0.80])
+                ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2),
+                        fancybox=True, ncol=2)
             
         if "events" in self.sim_data["data"].keys() and show_events:
             if "completed" in self.sim_data["data"]["events"]:
@@ -437,124 +398,274 @@ class Plotter:
         if not is_subplot:
             self.display_figure(save_fig)
 
-    def plot_meter_queue_length(self, tl_id, ax=None, time_range=None, plot_delay=True, plot_spillback=False, show_events=True, fig_title=None, ax_labels=True, q_ylim=None, d_ylim=None, scale_1000=True, save_fig=None):
+
+    def plot_rm_rate_detector_data(self, rm_ids: str|list|tuple, all_detector_ids: list|tuple, data_keys: list|tuple, time_range: list|tuple|None=None, aggregate_data: int=10, data_titles: list|tuple|None=None, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
-        Plot meter queue length and spillback (if available).
-        :param tl_id: Meter (traffic light) ID
-        :param plot_delay: Bool denoting whether to plot queue delay
-        :param plot_spillback: Bool denoting whether to plot ramp spillback
-        :param show_events: Bool denoting whether to plot when events occur
-        :param fig_title: If given, will overwrite default title
-        :param save_fig: Output image filename, will show image if not given
+        Plot ramp metering rate next to detector data.
+        :param rm_ids:         Ramp meter junction ID or list of IDs
+        :param detector_ids:   List of detector IDs or nested list for multiple meters
+        :param data_keys:      Plotting data keys ["speeds", "veh_counts", "occupancies"]
+        :param time_range:     Plotting time range (in plotter class units)
+        :param aggregate_data: Averaging interval in steps (defaults to 10)
+        :param data_titles:    List of axes titles, if given must have same length as data_keys
+        :param show_events:    Bool denoting whether to plot events on all axes
+        :param fig_title:      If given, will overwrite default title
+        :param save_fig:       Output image filename, will show image if not given
         """
         
-        self.spillback_vehs = None
+        if self.simulation != None:
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
+
+        start, end, step = self.sim_data["start"], self.sim_data["end"], self.sim_data["step_len"]
+
+        if not isinstance(rm_ids, (list, tuple)): rm_ids = [rm_ids]
+        if not isinstance(all_detector_ids[0], (list, tuple)): all_detector_ids = [all_detector_ids]
+
+        if len(rm_ids) != len(all_detector_ids):
+            raise ValueError("Plotter.plot_rm_rate_detector_data(): Number of rm_ids '{0}' and all_detector_ids groups '{1}' do not match.".format(len(rm_ids), len(all_detector_ids)))
+
+        if isinstance(data_titles, (list, tuple)) and len(data_titles) != len(data_keys):
+            raise KeyError("Plotter.plot_rm_rate_detector_data(): Length of data_keys and data_titles do not match.")
+
+        fig_dimensions = 4 if len(rm_ids) == 1 else 3
+        fig, all_axes = plt.subplots(len(rm_ids), 1+len(data_keys), figsize=((1+len(data_keys))*fig_dimensions, fig_dimensions*len(rm_ids)))
+        
+        if len(rm_ids) == 1: all_axes = [all_axes]
+        else:
+            new_axes = []
+            new_row = []
+            for col_idx in range(1+len(data_keys)):
+                for rm_idx in range(len(rm_ids)):
+                    new_row.append(all_axes[rm_idx][col_idx])
+                new_axes.append(new_row)
+                new_row = []
+            all_axes = new_axes
+
+
+        for rm_idx, (rm_id, detector_ids, axes) in enumerate(zip(rm_ids, all_detector_ids, all_axes)):
+            self.plot_rm_rate(rm_id, axes[0],
+                                    yax_labels=rm_idx==0, xax_labels=len(rm_ids)==1,
+                                    show_legend=len(rm_ids)==1,
+                                    time_range=time_range, show_events=show_events,
+                                    fig_title="Metering Rate" if len(rm_ids) == 1 else rm_id)
+            line_colours = plt.rcParams['axes.prop_cycle'].by_key()['color']
+
+            for idx, (data_key, ax) in enumerate(zip(data_keys, axes[1:])):
+
+                all_detector_data = []
+                for det_id in detector_ids:
+                    if "detector" in self.sim_data["data"].keys():
+                        if det_id in self.sim_data["data"]["detector"].keys():
+                            if data_key in self.sim_data["data"]["detector"][det_id].keys():
+                                det_data = self.sim_data["data"]["detector"][det_id][data_key]
+                                all_detector_data.append(det_data)
+                            else: raise KeyError("Plotter.plot_rm_rate_detector_data(): Unrecognised dataset key '{0}'.".format(data_key))
+                        else: raise KeyError("Plotter.plot_rm_rate_detector_data(): Unrecognised detector ID '{0}'.".format(det_id))
+                    else: raise KeyError("Plotter.plot_rm_rate_detector_data(): No detector data to plot.")
+
+                if len(set([len(data) for data in all_detector_data])) == 1:
+                    n_steps = len(all_detector_data[0])
+                else: raise AssertionError("Plotter.plot_rm_rate_detector_data(): Mismatching detector data lengths.")
+
+                avg_data, steps, curr_step = [], [], start
+                if time_range == None: time_range = [-math.inf, math.inf]
+                
+                while curr_step < end:
+                    if curr_step < time_range[0]: 
+                        curr_step += 1
+                        continue
+                    elif curr_step > time_range[1]: break
+                    
+                    step_data = [all_detector_data[det_idx][curr_step - start] for det_idx in range(len(detector_ids))]
+                    step_data = [val for val in step_data if val != -1]
+
+                    if len(step_data) > 0: avg_data.append(sum(step_data) / len(step_data))
+                    else: avg_data.append(-1)
+                    
+                    steps.append(curr_step)
+                    curr_step += 1
+
+                if isinstance(aggregate_data, (int, float)):
+                    avg_data, steps = get_aggregated_data(avg_data, steps, int(aggregate_data / step))
+                
+                steps = convert_time_units(steps, self.sim_time_units, step)
+                ax.plot(steps, avg_data, color=line_colours[1+idx])
+
+                xlim = [convert_time_units(start, self.sim_time_units, step), convert_time_units(end, self.sim_time_units, step)]
+                if time_range != None:
+                    xlim[0], xlim[1] = max(xlim[0], time_range[0]), min(xlim[1], time_range[1])
+
+                ax.set_xlim(xlim)
+                ax.set_ylim([0, get_axis_lim(avg_data)])
+                ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+                if rm_idx == 0: ax.set_ylabel(default_labels[data_key])
+                if len(rm_ids) == 1 or data_key == data_keys[-1]: ax.set_xlabel(default_labels["sim_time"])
+                
+                if len(rm_ids) == 1:
+                    if data_titles == None: ax.set_title(default_titles[data_key], pad=20)
+                    else: ax.set_title(data_titles[idx], pad=20)
+
+                if "events" in self.sim_data["data"].keys() and show_events:
+                    if "completed" in self.sim_data["data"]["events"]:
+                        self.plot_event(ax)
+
+        if len(rm_ids) == 1:
+            fig_title = "{0}'{1}' Data".format(self.sim_label, rm_id) if not isinstance(fig_title, str) else fig_title
+        else: fig_title = "{0}Ramp Metering & Detector Data".format(self.sim_label, rm_id) if not isinstance(fig_title, str) else fig_title
+        if fig_title != "": fig.suptitle(fig_title, fontweight='bold')
+        fig.tight_layout()
+        self.display_figure(save_fig)
+
+    def plot_rm_queuing(self, rm_id: str, ax=None, yax_labels: bool|list|tuple=True, xax_labels: bool=True, plot_delay: bool=True, time_range: list|tuple|None=None, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
+        """
+        Plot ramp metering rate.
+        :param rm_id:       Ramp meter junction ID
+        :param ax:          Matplotlib axis, used when creating subplots
+        :param yax_labels:  Bool denoting whether to include y-axis labels (for subplots). Either single bool for both y-axis labels or list of two bools to set both y-axes (when plotting delay).
+        :param xax_labels:  Bool denoting whether to include x-axis labels (for subplots)
+        :param plot_delay:  Bool denoting whether to plot queue delay. This will be done on the same plot with a separate y-axis.
+        :param time_range:  Plotting time range (in plotter class units)
+        :param show_events: Bool denoting whether to plot events on all axes
+        :param fig_title:   If given, will overwrite default title
+        :param save_fig:    Output image filename, will show image if not givenr
+        """
+
         if self.simulation != None:
 
             self.sim_data = self.simulation.all_data
             self.units = self.simulation.units.name
 
-            if tl_id in self.simulation.tracked_juncs.keys(): tl = self.simulation.tracked_juncs[tl_id]
-            else: raise KeyError("Plotter.plot_meter_queue_length(): Junction '{0}' not found in tracked junctions.".format(tl_id))
+            if rm_id in self.simulation.tracked_juncs.keys(): tl = self.simulation.tracked_juncs[rm_id]
+            else: raise KeyError("Plotter.plot_rm_queuing(): Junction '{0}' not found in tracked junctions.".format(rm_id))
 
             if tl.is_meter: 
                 if tl.measure_queues:
                     queue_lengths = tl.queue_lengths
                     queue_delays = tl.queue_delays
-                    if plot_spillback and tl.measure_spillback:
-                        spillback_vehs = tl.spillback_vehs
-                else: raise ValueError("Plotter.plot_meter_queue_length(): Meter '{0}' does not track queue lengths (no queue detector).".format(tl_id))
-            else: raise ValueError("Plotter.plot_meter_queue_length(): Junction '{0}' is not tracked as a meter.".format(tl_id))
+                else: raise ValueError("Plotter.plot_rm_queuing(): Meter '{0}' does not track queue lengths (no queue detector).".format(rm_id))
+            else: raise ValueError("Plotter.plot_rm_queuing(): Junction '{0}' is not tracked as a meter.".format(rm_id))
 
-        elif "junctions" in self.sim_data["data"].keys() and tl_id in self.sim_data["data"]["junctions"].keys():
-            if "meter" in self.sim_data["data"]["junctions"][tl_id].keys():
-                if "queue_lengths" in self.sim_data["data"]["junctions"][tl_id]["meter"].keys():
-                    queue_lengths = self.sim_data["data"]["junctions"][tl_id]["meter"]["queue_lengths"]
-                    queue_delays = self.sim_data["data"]["junctions"][tl_id]["meter"]["queue_delays"]
-                    if plot_spillback and "spillback_vehs" in self.sim_data["data"]["junctions"][tl_id]["meter"].keys():
-                        spillback_vehs = self.sim_data["data"]["junctions"][tl_id]["meter"]["spillback_vehs"]
-
-                else: raise ValueError("Plotter.plot_meter_queue_length(): Meter '{0}' does not track queue lengths (no queue detector).".format(tl_id))
-            else: raise ValueError("Plotter.plot_meter_queue_length(): Junction '{0}' is not tracked as a meter.".format(tl_id))
-        else: raise KeyError("Plotter.plot_meter_queue_length(): Junction '{0}' not found in tracked junctions.".format(tl_id))
+        elif "junctions" in self.sim_data["data"].keys() and rm_id in self.sim_data["data"]["junctions"].keys():
+            if "meter" in self.sim_data["data"]["junctions"][rm_id].keys():
+                if "queue_lengths" in self.sim_data["data"]["junctions"][rm_id]["meter"].keys():
+                    queue_lengths = self.sim_data["data"]["junctions"][rm_id]["meter"]["queue_lengths"]
+                    queue_delays = self.sim_data["data"]["junctions"][rm_id]["meter"]["queue_delays"]
+                else: raise ValueError("Plotter.plot_rm_queuing(): Meter '{0}' has not tracked queue lengths (no queue detector).".format(rm_id))
+            else: raise ValueError("Plotter.plot_rm_queuing(): Junction '{0}' has not been tracked as a meter.".format(rm_id))
+        else: raise KeyError("Plotter.plot_rm_queuing(): Junction '{0}' not found in tracked junctions.".format(rm_id))
 
         start, end, step = self.sim_data["start"], self.sim_data["end"], self.sim_data["step_len"]
-        
+
         is_subplot = ax != None
         if not is_subplot: fig, ax1 = plt.subplots(1, 1)
         else: ax1 = ax
 
-        data_time_vals = [x * step for x in range(start, end)]
         colour = 'tab:blue'
-        if plot_spillback:
-            total_queuing = [a + b for a, b in zip(queue_lengths, spillback_vehs)]
+        all_data_time_vals = convert_time_units([x for x in range(start, end)], self.sim_time_units, step)
+        data_time_vals, queue_lengths = limit_vals_by_range(all_data_time_vals, queue_lengths, time_range)
+        ax1.plot(data_time_vals, queue_lengths, linewidth=1.5, zorder=3, color=colour)
+        if xax_labels: ax1.set_xlabel(default_labels["sim_time"])
+        if (isinstance(yax_labels, bool) and yax_labels) or (isinstance(yax_labels, (list, tuple)) and len(yax_labels) == 2 and yax_labels[0]):
+            ax1.set_ylabel("No. of On-ramp Vehicles")
+        else: TypeError("Plotter.plot_rm_queuing(): Invalid yax_label, must be bool or list of 2 bools denoting each axis.")
 
-            y_vals, x_vals = limit_vals_by_range(data_time_vals, total_queuing, time_range)
-            ax1.plot(x_vals, y_vals, label='Total Waiting Vehicles', linewidth=1.5, zorder=3, color=colour)
+        if time_range == None: time_range = [-math.inf, math.inf]
+        ax1.set_xlim([max(time_range[0], data_time_vals[0]), min(time_range[1], data_time_vals[-1])])
+        ax1.set_ylim([0, get_axis_lim(queue_lengths)])
 
-            y_vals, x_vals = limit_vals_by_range(data_time_vals, queue_lengths, time_range)
-            ax1.plot(x_vals, y_vals, label='On-ramp Queue', linewidth=1.5, zorder=3, linestyle='--', color=colour)
-            if q_ylim == None: ax1.set_ylim([0, get_axis_lim(y_vals)])
-            else: ax1.set_ylim([0, q_ylim])
-            ax1.legend()
-        else:
-            y_vals, x_vals = limit_vals_by_range(data_time_vals, queue_lengths, time_range)
-            ax1.plot(x_vals, y_vals, linewidth=1.5, zorder=3, color=colour)
-            if q_ylim == None: ax1.set_ylim([0, get_axis_lim(y_vals)])
-            else: ax1.set_ylim([0, q_ylim])
-        
-        if ax_labels:
-            ax1.set_ylabel("Number of Vehicles", color=colour)
-        ax1.tick_params(axis='y', labelcolor=colour)
-        ax1.set_xlabel(default_labels["sim_time"])
-        xlim = [start * step, end * step]
-        if time_range != None:
-            xlim[0], xlim[1] = max(xlim[0], time_range[0]), min(xlim[1], time_range[1])
-        ax1.set_xlim(xlim)
-        ax1.grid(True, 'both', 'x', color='grey', linestyle='-', linewidth=0.5)
-        if not plot_delay: ax1.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
-
-        if plot_delay:
-
-            ax2 = ax1.twinx()
-            colour = 'tab:red'
-            y_vals, x_vals = limit_vals_by_range(data_time_vals, get_cumulative_arr(queue_delays), time_range)
-            
-            y_label = "Queue Delay (s)"
-            if max(y_vals) > 1000 or scale_1000:
-                y_vals = [y / 1000 for y in y_vals]
-                if d_ylim != None: d_ylim /= 1000
-                y_label = "Queue Delay (x$\mathregular{10^3}$s)"
-            ax2.plot(x_vals, y_vals, linewidth=1.5, zorder=2, color=colour)
-
-            if ax_labels:
-                ax2.set_ylabel(y_label, color=colour)
-            ax2.tick_params(axis='y', labelcolor=colour)
-            if d_ylim == None: ax2.set_ylim([0, get_axis_lim(y_vals)])
-            else: ax2.set_ylim([0, d_ylim])
-            xlim = [start * step, end * step]
-            if time_range != None:
-                xlim[0], xlim[1] = max(xlim[0], time_range[0]), min(xlim[1], time_range[1])
-            ax2.set_xlim(xlim)
-            ax2.grid(True, 'both', 'y', color='grey', linestyle='-', linewidth=0.5)
+        ax1.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+        if not is_subplot or fig_title != None:
+            if not isinstance(fig_title, str):
+                default_title = "{0}'{1}' Queue Lengths".format(self.sim_label, rm_id)
+                if plot_delay: default_title += " & Cumulative Delay"
+                fig_title = default_title
+            ax1.set_title(fig_title, pad=20)
 
         if "events" in self.sim_data["data"].keys() and show_events:
             if "completed" in self.sim_data["data"]["events"]:
                 self.plot_event(ax1)
 
-        fig_title = "{0}'{1}' Queue Lengths & Cumulative Delay".format(self.sim_label, tl_id) if not isinstance(fig_title, str) else fig_title
-        ax1.set_title(fig_title, pad=20)
+        if plot_delay:
+            ax1.tick_params(axis='y', labelcolor=colour)
+            if (isinstance(yax_labels, bool) and yax_labels) or (isinstance(yax_labels, (list, tuple)) and len(yax_labels) == 2 and yax_labels[0]):
+                ax1.set_ylabel("No. of On-ramp Vehicles", color=colour)
+        
+            colour = 'tab:red'
+            data_time_vals, queue_delays = limit_vals_by_range(all_data_time_vals, queue_delays, time_range)
+            queue_delays = get_cumulative_arr(queue_delays)
+            ax2 = ax1.twinx()
+
+            ax2.plot(data_time_vals, queue_delays, linewidth=1.5, zorder=3, color=colour)
+            ax2.tick_params(axis='y', labelcolor=colour)
+            if (isinstance(yax_labels, bool) and yax_labels) or (isinstance(yax_labels, (list, tuple)) and len(yax_labels) == 2 and yax_labels[1]):
+                ax2.set_ylabel("Cumulative Delay (s)", color=colour)
+            else: TypeError("Plotter.plot_rm_queuing(): Invalid yax_label, must be bool or list of 2 bools denoting each axis.")
+            ax2.set_ylim([0, get_axis_lim(queue_delays)])
 
         if not is_subplot:
-            fig_title = "{0}'{1}' Queue Lengths & Cumulative Delay".format(self.sim_label, tl_id) if not isinstance(fig_title, str) else fig_title
             fig.tight_layout()
-
             self.display_figure(save_fig)
 
-    def plot_vehicle_detector_data(self, dataset, save_fig=None):
+    def plot_rm_rate_queuing(self, rm_ids: str|list|tuple, plot_queuing: bool=True, time_range: list|tuple|None=None, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
+        """
+        Plot meter queue length and delay.
+        :param rm_ids:       Ramp meter junction ID or list of IDs
+        :param plot_queuing: Bool denoting whether to plot queue lengths and delay (set False to only plot metering rate)
+        :param time_range:   Plotting time range (in plotter class units)
+        :param show_events:  Bool denoting whether to plot when events occur
+        :param fig_title:    If given, will overwrite default title
+        :param save_fig:     Output image filename, will show image if not given
+        """
+
+        if self.simulation != None:
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
+
+        if not isinstance(rm_ids, (list, tuple)): rm_ids = [rm_ids]
+        
+        fig_dimensions = 4
+        if len(rm_ids) == 1:
+            if plot_queuing:
+                fig, (ax, ax2) = plt.subplots(1, 2, figsize=(fig_dimensions*2, fig_dimensions))
+                self.plot_rm_queuing(rm_ids[0], ax2, True, True, True, time_range, show_events, fig_title="Queue Lengths & Delays")
+            else: fig, ax = plt.subplots(1, 1, figsize=(fig_dimensions*2, fig_dimensions))
+            self.plot_rm_rate(rm_ids[0], ax,
+                                    yax_labels=True, xax_labels=True,
+                                    time_range=time_range,
+                                    show_legend=True,
+                                    show_events=show_events,
+                                    fig_title="Metering Rate")
+        
+        else:
+            nrows, ncols = 2 if plot_queuing else 1, len(rm_ids)
+            fig, axes = plt.subplots(nrows, ncols, figsize=(ncols*fig_dimensions*1.2, nrows*fig_dimensions))
+
+            for idx, rm_id in enumerate(rm_ids):
+                ax = axes[0][idx] if plot_queuing else axes[idx]
+                self.plot_rm_rate(rm_id, ax,
+                                        yax_labels=idx==0,
+                                        xax_labels=not plot_queuing,
+                                        time_range=time_range,
+                                        show_legend=False,
+                                        show_events=show_events,
+                                        fig_title=rm_id)
+                
+                if plot_queuing:
+                    self.plot_rm_queuing(rm_id, axes[1][idx], (idx==0, idx==len(rm_ids)-1), True, True, time_range, show_events, "")
+
+        def_title = "Ramp Metering Rates"
+        if plot_queuing: def_title += " & Queuing Data"
+        fig_title = self.sim_label+def_title if not isinstance(fig_title, str) else fig_title
+        if fig_title != "": fig.suptitle(fig_title, fontweight='bold')
+
+        fig.tight_layout()
+        self.display_figure(save_fig)
+
+    def plot_vehicle_detector_data(self, dataset: str|list|tuple, save_fig: str|None=None) -> None:
         """
         Plots all collected vehicle or detector data.
-        :param dataset: Dataset key (either "vehicle" or ["detector", detector_id])
+        :param dataset:  Dataset key (either "vehicle" or ["detector", detector_id])
         :param save_fig: Output image filename, will show image if not given
         """
 
@@ -566,7 +677,7 @@ class Plotter:
             if dataset in self.sim_data["data"].keys(): data = self.sim_data["data"][dataset]
             else: raise KeyError("Plotter.plot_vehicle_detector_data(): Unrecognised dataset key '{0}'.".format(dataset))
             title = self.sim_label + dataset.title() + " Data"
-        elif isinstance(dataset, list) or isinstance(dataset, tuple): # Detector data
+        elif isinstance(dataset, (list, tuple)): # Detector data
             data = self.sim_data["data"]
             if "detector" not in data.keys():
                 raise KeyError("Plotter.plot_vehicle_detector_data(): No detector data to plot.")
@@ -598,7 +709,7 @@ class Plotter:
 
         self.display_figure(save_fig)
 
-    def plot_n_vehicles(self, cumulative=True, show_events=True, save_fig=None):
+    def plot_n_vehicles(self, cumulative: bool=True, show_events: bool=True, save_fig: str|None=None) -> None:
         """
         Plot the number of vehicles in the system.
         :param cumulative: Bool denoting whether values are displayed cumulatively
@@ -637,7 +748,7 @@ class Plotter:
 
         self.display_figure(save_fig)
 
-    def plot_cumulative_curve(self, inflow_detectors=None, outflow_detectors=None, outflow_offset=0, show_events=True, fig_title = None, save_fig=None):
+    def plot_cumulative_curve(self, inflow_detectors: list|tuple|None=None, outflow_detectors: list|tuple|None=None, outflow_offset: int|float=0, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot inflow and outflow cumulative curves, either system-wide or using inflow/outflow detectors (if given).
         :param inflow_detectors: List of inflow detectors
@@ -722,7 +833,7 @@ class Plotter:
 
         self.display_figure(save_fig)
 
-    def plot_vsl_data(self, vsl_id, avg_geomtry_speeds = False, show_events = True, fig_title = None, save_fig = None) -> None:
+    def plot_vsl_data(self, vsl_id: str, avg_geomtry_speeds: bool=False, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot VSL settings and average vehicle speeds on affected edges.
         :param vsl_id: VSL controller ID
@@ -850,7 +961,7 @@ class Plotter:
 
         self.display_figure(save_fig)
 
-    def plot_rg_data(self, rg_id, show_events = True, fig_title = None, save_fig = None) -> None:
+    def plot_rg_data(self, rg_id: str, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot how many vehicles are diverted by RG controller.
         :param rg_id: RG controller ID
@@ -911,7 +1022,7 @@ class Plotter:
 
         self.display_figure(save_fig)
 
-    def plot_space_time_diagram(self, edge_ids = None, time_range = None, upstream_at_top = True, fig_title = None, save_fig = None):
+    def plot_space_time_diagram(self, edge_ids: list|tuple, time_range: list|tuple|None=None, upstream_at_top: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot space time data from tracked edge data.
         :param edge_ids: Single tracked egde ID or list of IDs
@@ -928,8 +1039,7 @@ class Plotter:
         if "edges" not in self.sim_data["data"].keys():
             raise KeyError("Plotter.plot_space_time_diagram(): No edges tracked during the simulation.")
         
-        if edge_ids == None: edge_ids = list(self.sim_data["data"].keys())
-        elif not isinstance(edge_ids, (list, tuple)): edge_ids = [edge_ids]
+        if not isinstance(edge_ids, (list, tuple)): edge_ids = [edge_ids]
 
         fig, ax = plt.subplots(1, 1)
         edge_offset = 0
@@ -999,7 +1109,7 @@ class Plotter:
 
         self.display_figure(save_fig)
 
-    def plot_event(self, ax):
+    def plot_event(self, ax) -> None:
         """
         Plot events from the simulation data on a given axes.
         :param ax: matplotlib.pyplot.axes object
@@ -1014,7 +1124,7 @@ class Plotter:
 
             ax.text(event["start_time"] * self.sim_data["step_len"] + ((event["end_time"] - event["start_time"]) * self.sim_data["step_len"]/2), y_lim[1] * 0.9, event["id"], horizontalalignment='center', color="red")
 
-def compare_vehicle_data(scenarios_data, data_key, labels = None, colours = None, linestyles = None, linewidths = None, cumulative=False, fig_title = None, save_fig = None):
+def compare_vehicle_data(scenarios_data, data_key, labels = None, colours = None, linestyles = None, linewidths = None, cumulative=False, fig_title: str|None=None, save_fig: str|None=None) -> None:
 
     default_titles = {"no_vehicles": "Number of Vehicles", "c_no_vehicles": "Total Number of Vehicles",
                       "tts": "Total Time Spent", "c_tts": "Cumulative Time Spent",
@@ -1055,6 +1165,19 @@ def compare_vehicle_data(scenarios_data, data_key, labels = None, colours = None
 
 if __name__ == "__main__":
 
+    if True:
+
+        label = "ALINEA Scenario"
+        plotter = Plotter("../dev/data/m_ex/ALINEA/all_alinea.json", sim_label=label, sim_time_units="hr")
+        #plotter.plot_rm_rate("RM_E15")
+        #plotter.plot_rm_rate_queuing(["RM_E7", "RM_E12", "RM_E15"], True)
+
+        plotter.plot_rm_rate_detector_data(["RM_E15"], [["E15_down_occ_0", "E15_down_occ_1", "E15_down_occ_2"]], ["speeds", "occupancies"], data_titles=["Vehicle Speed", "Downstream Occupancy"], aggregate_data=30)
+        
+        #plotter.plot_rm_rate_detector_data(["RM_E7", "RM_E12", "RM_E15"], [["E7_down_occ_0", "E7_down_occ_1", "E7_down_occ_2"], ["E12_down_occ_0", "E12_down_occ_1", "E12_down_occ_2"], ["E15_down_occ_0", "E15_down_occ_1", "E15_down_occ_2"]], ["speeds", "occupancies"], data_titles=["Vehicle Speed", "Downstream Occupancy"], aggregate_data=30)
+
+    exit()
+
     if False: # Plot Comparisons
 
         fps = ["no_control_zip.json", "alinea_zip.json", "ppo_local_zip.json", "ppo_coordinated_zip.json"]
@@ -1077,6 +1200,16 @@ if __name__ == "__main__":
 
     if True: # Plot Simulation Summaries
 
+        label = "ex_v2 ALINEA"
+        plotter = Plotter('alinea_sdcsd.json', sim_label=label)
+        print('loaded')
+        #plotter.plot_rm_rate('RM_E7', time_range=[500, 10000])
+        plotter.plot_rm_rate('RM_E15', time_range=[500, 10000])
+        plotter.plot_rm_rate('RM_E12', time_range=[500, 10000])
+        #plotter.plot_space_time_diagram(['E1_0', 'E1_1', 'E2_0', 'E2_1', 'E2_2', 'E3_0', 'E3_1', 'E3_2', 'E4', 'E5_0', 'E5_1', 'E5_2', 'E5_3'], time_range=[500, 10000], fig_title=label)
+ 
+        exit()
+
         label = "ex_v2 No Control"
         plotter = Plotter('../dev/data/ex/alinea.json', sim_label=label, fig_save_loc="../dev/figs/ex_v2/")
         print('loaded')
@@ -1094,5 +1227,5 @@ if __name__ == "__main__":
         plotter5.plot_space_time_diagram(['321901470', '126729982', '126730069', '126730059', '509506847'])
         plotter5.plot_vsl_data('vsl_0')
         plotter5.plot_rg_data('rg_0')
-        plotter5.plot_metering_rate("crooswijk_meter")
+        plotter5.plot_rm_rate("crooswijk_meter")
         
