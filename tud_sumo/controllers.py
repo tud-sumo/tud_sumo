@@ -16,7 +16,8 @@ class VSLController:
         self.activated = False
 
         if "geometry_ids" not in vsl_params.keys():
-            raise KeyError("(step {0}) VSLController.init(): Geometry ID(s) are a required input for VSL controllers (key: 'geometry_ids').".format(self.sim.curr_step))
+            desc = "Geometry ID(s) are a required input for VSL controllers (key: 'geometry_ids')."
+            raise_error(KeyError, desc, self.sim.curr_step)
         else: self.geometry_ids = vsl_params["geometry_ids"]
 
         self.geometry = {}
@@ -26,14 +27,17 @@ class VSLController:
                 #print(traci.edge.getIDList(), geometry_id in traci.edge.getIDList())
                 #exit()
                 self.geometry[geometry_id] = {"g_type": g_type, "nc_speed_limit": self.sim.get_geometry_vals(geometry_id, "max_speed"), "avg_speeds": []}
-            else: raise KeyError("(step {0}) VSLController.init(): Geometry ID '{1}' not found.".format(self.sim.curr_step, geometry_id))
+            else:
+                desc = "Geometry ID '{0}' not found.".format(geometry_id)
+                raise_error(KeyError, desc, self.sim.curr_step)
 
         self.speed_limits = []
         self.times = []
 
         self.speed_limit = None if "def_limits" not in vsl_params.keys() else vsl_params["def_limits"]
 
-    def __str__(self): return "<Junction: '{0}'>".format(self.id)
+    def __str__(self): return "<VSLController: '{0}'>".format(self.id)
+    def __name__(self): return "VSLController"
 
     def get_curr_data(self) -> dict:
         vsl_dict = {"type": "VSL", "geometry_data": self.geometry, "init_time": self.init_time, "curr_time": self.curr_time,
@@ -42,7 +46,8 @@ class VSLController:
     
     def set_limit(self, speed_limit: int|float|None = None) -> None:
         if self.speed_limit == None and speed_limit == None:
-            raise ValueError("(step {0}) VSLController.set_limit(): Cannot change speed limit as no value given.".format(self.sim.curr_step))
+            desc = "Cannot change speed limit as no value given."
+            raise_error(ValueError, desc, self.sim.curr_step)
         
         else:
             if speed_limit != None: self.speed_limit = speed_limit
@@ -111,7 +116,8 @@ class RGController:
         self.highlight_colour = None if "highlight" not in rg_params.keys() else rg_params["highlight"]
         
         if "detector_ids" not in rg_params.keys():
-            raise KeyError("(step {0}) RGController.init(): Detector ID(s) are a required input for RG controllers (key: 'detector_ids').".format(self.sim.curr_step))
+            desc = "Detector ID(s) are a required input for RG controllers (key: 'detector_ids')."
+            raise_error(KeyError, desc, self.sim.curr_step)
         else: self.detector_ids = rg_params["detector_ids"]
         
         if not isinstance(self.detector_ids, (list, tuple)): 
@@ -120,12 +126,15 @@ class RGController:
         self.detector_info = {}
         for detector_id in self.detector_ids:
             if detector_id not in self.sim.available_detectors.keys():
-                raise KeyError("(step {0}) RGController.init(): Detector ID '{1}' not found.".format(self.sim.curr_step, detector_id))
+                desc = "Detector ID '{0}' not found.".format(detector_id)
+                raise_error(KeyError, desc, self.sim.curr_step)
             elif self.sim.available_detectors[detector_id]["type"] != 'inductionloop':
-                raise KeyError("(step {0}) RGController.init(): Invalid RG detector type (must be 'inductionloop' not '{1}')".format(self.sim.curr_step, self.sim.available_detectors[detector_id]["type"]))
+                desc = "Invalid RG detector type (must be 'inductionloop' not '{0}')".format(self.sim.available_detectors[detector_id]["type"])
+                raise_error(KeyError, desc, self.sim.curr_step)
             else: self.detector_info[detector_id] = {"location": traci.inductionloop.getLaneID(detector_id)}
 
     def __str__(self): return "<RGController: '{0}'>".format(self.id)
+    def __name__(self): return "RGController"
 
     def get_curr_data(self) -> dict:
         rg_dict = {"type": "RG", "detector_ids": self.detector_info, "init_time": self.init_time, "curr_time": self.curr_time}
@@ -143,14 +152,17 @@ class RGController:
     
     def activate(self, old_target: str|int|None = None, new_target: str|int|None = None, diversion_pct: float|None = None, highlight_colour: str|None = None) -> dict:
         if self.target == None and new_target == None:
-            raise ValueError("(step {0}) RGController.activate(): Cannot activate as no target given.".format(self.sim.curr_step))
+            desc = "Cannot activate as no target given."
+            raise_error(ValueError, desc, self.sim.curr_step)
         else:
             if not self.activated:
                 if new_target != None: self.target = new_target
 
                 if self.target in self.sim.all_edges: self.g_type = 'EDGE'
                 elif self.target in self.sim.all_routes: self.g_type = 'ROUTE'
-                else: raise ValueError("(step {0}) RGController.activate(): Route or edge ID '{1}' not found".format(self.sim.curr_step, self.target))
+                else:
+                    desc = "Route or edge ID '{1}' not found".format(self.target)
+                    raise_error(KeyError, desc, self.sim.curr_step)
 
                 self.activated = True
                 self.activation_times.append(self.curr_time)
@@ -158,12 +170,12 @@ class RGController:
                 if old_target != None: self.old_target = old_target
 
                 if highlight_colour != None: self.highlight_colour = highlight_colour
-            elif not self.sim.suppress_warnings: print("(step {0}) (WARNING) RGController.activate(): RG controller '{1}' is already activated.".format(self.sim.curr_step, self.id))
+            elif not self.sim.suppress_warnings: raise_warning("RG controller '{0}' is already activated.".format(self.id), self.sim.curr_step)
 
     def deactivate(self) -> None:
         
         if not self.activated:
-            raise AssertionError("(step {0}) RGController.deactivate(): Controller already deactivated.".format(self.sim.curr_step))
+            if not self.sim.suppress_warnings: raise_warning("Controller already deactivated.", self.sim.curr_step)
         else:
             self.activated = False
 

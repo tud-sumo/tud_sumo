@@ -1,4 +1,4 @@
-import json, math, matplotlib.pyplot as plt, numpy as np
+import json, math, csv, matplotlib.pyplot as plt, numpy as np
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import os.path
 from copy import deepcopy
@@ -6,8 +6,7 @@ from simulation import Simulation
 from utils import *
 
 default_labels = {"no_vehicles": "No. of Vehicles", "tts": "Total Time Spent (s)", "delay": "Delay (s)",
-                  "veh_counts": "No. of Vehicles", "occupancies": "Occupancy (%)", "densities": "Density unit",
-                  "sim_time": "Simulation Time"}
+                  "veh_counts": "No. of Vehicles", "occupancies": "Occupancy (%)", "densities": "Density unit"}
 
 default_titles = {"no_vehicles": "Number of Vehicles", "tts": "Total Time Spent", "delay": "Delay",
                   "veh_counts": "Number of Vehicles", "occupancies": "Vehicle Occupancies", "densities": "Vehicle Density",
@@ -62,7 +61,7 @@ class Plotter:
             self.sim_time_units = sim_time_units.lower()
         else: raise ValueError("Plotter.init(): Invalid simulation time unit '{0}' (must be 'steps'|'s'|'hr').".format(sim_time_units))
         
-        default_labels["sim_time"] += " ({0})".format(self.sim_time_units)
+        default_labels["sim_time"] = "Simulation Time ({0})".format(self.sim_time_units)
         default_labels["speeds"] = avg_speed
         default_labels["speed"] = speed
         default_labels["limits"] = limit
@@ -73,6 +72,9 @@ class Plotter:
             if not os.path.exists(self.fig_save_loc):
                 raise FileNotFoundError("Plotter.init(): File path '{0}' does not exist.".format(self.fig_save_loc))
 
+    def __name__(self):
+        return "Plotter"
+    
     def display_figure(self, filename: str|None=None) -> None:
 
         if filename is None: plt.show()
@@ -1055,6 +1057,8 @@ class Plotter:
             y_label = "Distance (mi)"
         x_label = default_labels["sim_time"]
 
+        if time_range == None: time_range = [-math.inf, math.inf]
+
         for e_id in edge_ids:
             if e_id not in self.sim_data["data"]["edges"].keys():
                 raise KeyError("Plotter.plot_space_time_diagram(): Edge '{0}' not found in tracked edges.".format(e_id))
@@ -1065,28 +1069,37 @@ class Plotter:
             edge_length = e_data["length"]
             start, step = e_data["init_time"], self.sim_data["step_len"]
 
-            curr_time = start * step
-            
+            curr_step = start
+            curr_time = convert_time_units(curr_step, self.sim_time_units, step)
+
+            # Chane with new time unit settings! Also, currently will not plot anything
+            # if there is no time_range, which does not make any sense
             for step_data in step_vehicles:
-                if time_range != None:
-                    if curr_time <= time_range[1] and curr_time >= time_range[0]:
-                        for veh_data in step_data:
+                if curr_time <= time_range[1] and curr_time >= time_range[0]:
+                    for veh_data in step_data:
 
-                            speed_vals.append(veh_data[1])
-                            x_vals.append(curr_time)
+                        speed_vals.append(veh_data[1])
+                        x_vals.append(curr_time)
 
-                            y_val = (veh_data[0] * edge_length) + edge_offset
-                            if not upstream_at_top: y_val = total_len - y_val
-                            y_val *= y_scale
-                            y_vals.append(y_val)
-                    elif curr_time > time_range[1]:
-                        break
+                        y_val = (veh_data[0] * edge_length) + edge_offset
+                        if not upstream_at_top: y_val = total_len - y_val
+                        y_val *= y_scale
+                        y_vals.append(y_val)
+                elif curr_time > time_range[1]:
+                    break
 
-                curr_time += step
+                curr_step += step
+                curr_time = convert_time_units(curr_step, self.sim_time_units, step)
 
             edge_offset += edge_length
 
-        points = ax.scatter(x_vals, y_vals, c=speed_vals, s=1.5, cmap='hot')
+        if len(x_vals) == 0 or len(y_vals) == 0:
+            if time_range == None:
+                raise ValueError("Plotter.plot_space_time_diagram(): No data to plot (no vehicles recorded on edges).")
+            else:
+                raise ValueError("Plotter.plot_space_time_diagram(): No data to plot (no vehicles recorded during time frame '{0}-{1}{2}').".format(time_range[0], time_range[1], self.sim_time_units))
+        
+        points = ax.scatter(x_vals, y_vals, c=speed_vals, s=0.5, cmap='hot')
 
         divider = make_axes_locatable(ax)
         cax = divider.append_axes("right", size="5%", pad=0.1)
@@ -1163,42 +1176,129 @@ def compare_vehicle_data(scenarios_data, data_key, labels = None, colours = None
     if save_fig is None: plt.show(block=True)
     else: plt.savefig(save_fig)
 
+def plot_lppo_density(filename):
+    with open(filename, 'r') as fp:
+        reader = csv.reader(fp)
+
+        data = {}
+        for row in reader:
+            rm_id = row[1]
+            if rm_id not in data.keys():
+                data[rm_id] = {'densities': [], 'rewards': [], 'steps': []}
+            data[rm_id]['densities'].append(float(row[3]))
+            data[rm_id]['rewards'].append(float(row[2]))
+            data[rm_id]['steps'].append(int(row[0]))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    
+    min_t, max_t = math.inf, -math.inf
+    for rm_id, rm_data in data.items():
+        steps = convert_time_units(rm_data['steps'], "hr", 0.5)
+        min_t, max_t = min(min(steps), min_t), max(max(steps), max_t)
+        ax1.plot(steps, rm_data['densities'], label=rm_id, linewidth=1)
+        ax2.plot(steps, rm_data['rewards'], label=rm_id, linewidth=1)
+
+    ax1.set_title("Downstream Density")
+    ax1.set_xlabel("Simulation Time (hr)")
+    ax1.set_ylabel("Density (veh/km)")
+    ax1.set_xlim([min_t, max_t])
+    ax1.legend()
+    
+    ax2.set_title("Agent Reward")
+    ax2.set_xlabel("Simulation Time (hr)")
+    ax2.set_ylabel("Agent Reward")
+    ax2.set_xlim([min_t, max_t])
+    
+    fig.suptitle("Local PPO Scenario: Downstream Density & Agent Reward", fontweight='bold')
+    fig.tight_layout()
+    plt.show()
+
+def plot_cppo_density(filename):
+    with open(filename, 'r') as fp:
+        reader = csv.reader(fp)
+
+        densities, rewards, steps = [], [], []
+        for row in reader:
+            densities.append(float(row[2]))
+            rewards.append(float(row[1]))
+            steps.append(int(row[0]))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
+    
+    steps = convert_time_units(steps, "hr", 0.5)
+    min_t, max_t = min(min(steps), math.inf), max(max(steps), -math.inf)
+    ax1.plot(steps, densities, linewidth=1)
+    ax2.plot(steps, rewards, linewidth=1)
+
+    ax1.set_title("Mainline Density")
+    ax1.set_xlabel("Simulation Time (hr)")
+    ax1.set_ylabel("Density (veh/km)")
+    ax1.set_xlim([min_t, max_t])
+    
+    ax2.set_title("Agent Reward")
+    ax2.set_xlabel("Simulation Time (hr)")
+    ax2.set_ylabel("Agent Reward")
+    ax2.set_xlim([min_t, max_t])
+    
+    fig.suptitle("Coordinated PPO Scenario: Downstream Density & Agent Reward", fontweight='bold')
+    fig.tight_layout()
+    plt.show()
+
 if __name__ == "__main__":
 
-    if True:
+    if False:
 
-        label = "ALINEA Scenario"
-        plotter = Plotter("../dev/data/m_ex/ALINEA/all_alinea.json", sim_label=label, sim_time_units="hr")
+        for label, filename in zip(["No Control Scenario", "ALINEA", "Local PPO Scenario", "Coordinated PPO Scenario"], ["nc", "alinea", "lppo", "cppo"]):
+            if filename != "cppo": continue
+            print('loading '+filename)
+            plotter = Plotter("ramp_metering/new_net_test_"+filename+".json", sim_label=label, sim_time_units="hr")
+            print('loaded')
+            plotter.plot_n_vehicles()
+            plotter.plot_n_vehicles(False)
+            plotter.plot_space_time_diagram(['E1_0', 'E1_1', 'E2_0', 'E2_1', 'E2_2', 'E2_3', 'E3_0', 'E3_1', 'E3_2', 'E3_3', 'E4', 'E5_0', 'E5_1', 'E5_2', 'E5_3'], time_range=[0.06944444, 10000], fig_title=label)
+
+            if filename != "nc":
+                plotter.plot_rm_rate_queuing(["RM_E7", "RM_E12", "RM_E15"], True)
+                plotter.plot_rm_rate_detector_data(["RM_E7", "RM_E12", "RM_E15"], [["E7_down_occ_0", "E7_down_occ_1", "E7_down_occ_2"], ["E12_down_occ_0", "E12_down_occ_1", "E12_down_occ_2"], ["E15_down_occ_0", "E15_down_occ_1", "E15_down_occ_2"]], ["speeds", "occupancies"], data_titles=["Vehicle Speed", "Downstream Occupancy"], aggregate_data=20)
+            
+            if filename == "lppo" and os.path.exists("ramp_metering/lppo_densities.csv"):
+                plot_lppo_density("ramp_metering/lppo_densities.csv")
+            elif filename == "cppo" and os.path.exists("ramp_metering/cppo_densities.csv"): plot_cppo_density("ramp_metering/cppo_densities.csv")
+            print('finished plots\n')
+
+        #label = "Coordinated PPO Scenario"
+        #plotter = Plotter("../dev/data/m_ex/ALINEA/all_alinea.json", sim_label=label, sim_time_units="hr")
+        #plotter = Plotter("ramp_metering/new_net_test_cppo.json", sim_label=label, sim_time_units="hr")
         #plotter.plot_rm_rate("RM_E15")
         #plotter.plot_rm_rate_queuing(["RM_E7", "RM_E12", "RM_E15"], True)
-
-        plotter.plot_rm_rate_detector_data(["RM_E15"], [["E15_down_occ_0", "E15_down_occ_1", "E15_down_occ_2"]], ["speeds", "occupancies"], data_titles=["Vehicle Speed", "Downstream Occupancy"], aggregate_data=30)
+        #plotter.plot_space_time_diagram(['E1_0', 'E1_1', 'E2_0', 'E2_1', 'E2_2', 'E3_0', 'E3_1', 'E3_2', 'E4', 'E5_0', 'E5_1', 'E5_2', 'E5_3'], time_range=[200, 300], fig_title=label)#0.06944444, 10000], fig_title=label)
+ 
+        #plotter.plot_rm_rate_detector_data(["RM_E15"], [["E15_down_occ_0", "E15_down_occ_1", "E15_down_occ_2"]], ["speeds", "occupancies"], data_titles=["Vehicle Speed", "Downstream Occupancy"], aggregate_data=30)
         
         #plotter.plot_rm_rate_detector_data(["RM_E7", "RM_E12", "RM_E15"], [["E7_down_occ_0", "E7_down_occ_1", "E7_down_occ_2"], ["E12_down_occ_0", "E12_down_occ_1", "E12_down_occ_2"], ["E15_down_occ_0", "E15_down_occ_1", "E15_down_occ_2"]], ["speeds", "occupancies"], data_titles=["Vehicle Speed", "Downstream Occupancy"], aggregate_data=30)
 
-    exit()
 
-    if False: # Plot Comparisons
+    if True: # Plot Comparisons
 
-        fps = ["no_control_zip.json", "alinea_zip.json", "ppo_local_zip.json", "ppo_coordinated_zip.json"]
+        fps = ["ramp_metering/test2/data/new_net_test_nc.json", "ramp_metering/test2/data/new_net_test_alinea.json", "ramp_metering/test2/data/new_net_test_lppo.json", "ramp_metering/test2/data/new_net_test_cppo.json"]
         labels = ["No Control Scenario", "ALINEA Scenario", "Local PPO Agents Scenario", "Coordinated PPO Agents Scenario"]
         datasets = []
         for fp, label in zip(fps, labels):
-            plotter = Plotter("../dev/data/ex/"+fp)
+            plotter = Plotter(fp)
             #plotter.plot_metering_rates(['RM_E7', 'RM_E15', 'RM_E12'], True, fig_title=label, time_range=[500, 10000])#, 'RM_E15', 'RM_E12'])
 
-            with open("../dev/data/ex/"+fp, 'r') as file:
+            with open(fp, 'r') as file:
                 
                 dat = json.load(file)
                 datasets.append(dat)
                 print("loaded", fp)
 
-        compare_vehicle_data(datasets, "no_vehicles", ["No Control", "ALINEA", "Local PPO", "Coordinated PPO"])
-        compare_vehicle_data(datasets, "tts", ["No Control", "ALINEA", "Local PPO", "Coordinated PPO"], cumulative=True)
-        compare_vehicle_data(datasets, "delay", ["No Control", "ALINEA", "Local PPO", "Coordinated PPO"], cumulative=True)
+        #compare_vehicle_data(datasets, "no_vehicles", ["No Control", "ALINEA", "Local PPO", "Coordinated PPO"])
+        compare_vehicle_data(datasets, "tts", ["No Control", "ALINEA", "Local PPO", "Coordinated PPO"], cumulative=False)
+        compare_vehicle_data(datasets, "delay", ["No Control", "ALINEA", "Local PPO", "Coordinated PPO"], cumulative=False)
 
 
-    if True: # Plot Simulation Summaries
+    if False: # Plot Simulation Summaries
 
         label = "ex_v2 ALINEA"
         plotter = Plotter('alinea_sdcsd.json', sim_label=label)
@@ -1217,7 +1317,7 @@ if __name__ == "__main__":
         exit()
         plotter.plot_n_vehicles(save_fig="n_vehicles")
         plotter.plot_n_vehicles(False, save_fig="cumulative_n_vehicles")
-        plotter.plot_space_time_diagram(['E1_0', 'E1_1', 'E2_0', 'E2_1', 'E2_2', 'E3_0', 'E3_1', 'E3_2', 'E4', 'E5_0', 'E5_1', 'E5_2', 'E5_3'], time_range=[500, 10000], fig_title=label, save_fig="st")
+        plotter.plot_space_time_diagram(['E1_0', 'E1_1', 'E2_0', 'E2_1', 'E2_2', 'E3_0', 'E3_1', 'E3_2', 'E4', 'E5_0', 'E5_1', 'E5_2', 'E5_3'], time_range=[0, 10000], fig_title=label, save_fig="st")
  
     if False: # Plot controllers
         plotter5 = Plotter("controller_demo.json")

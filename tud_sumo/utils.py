@@ -1,4 +1,4 @@
-import json, os, math, numpy as np
+import json, os, math, inspect, numpy as np
 from enum import Enum
 from datetime import datetime
 
@@ -12,6 +12,22 @@ class Controller(Enum):
     RG = 2
     METER = 3
 
+def raise_error(error, desc, curr_sim_step=None):
+    try:
+        caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+        error_msg = "{0}: {1}".format(caller, desc)
+        if curr_sim_step != None: error_msg = "(step {0}) ".format(curr_sim_step) + error_msg
+        raise error(error_msg)
+    except Exception:
+        print("tud_sumo: An unknown error occurred.")
+        exit()
+
+def raise_warning(desc, curr_sim_step=None):
+    caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+    warning_msg = "(WARNING) {0}: {1}".format(caller, desc)
+    if curr_sim_step != None: warning_msg = "(step {0}) ".format(curr_sim_step) + warning_msg
+    print(warning_msg)
+
 def convert_time_units(time_vals, unit, step_len):
     if not isinstance(time_vals, list): time_vals = [time_vals]
     if unit == "steps": return time_vals
@@ -24,8 +40,6 @@ def convert_time_units(time_vals, unit, step_len):
 
     if len(time_vals) == 1: return time_vals[0]
     else: return time_vals
-
-    
 
 def get_time_steps(data_vals, unit, step_len=None, start=0):
     time_vals = list(range(len(data_vals)))
@@ -54,24 +68,27 @@ def get_scenario_name(filepath: str) -> str:
     elif cfg_file.endswith('.neteditcfg'): cfg_file = cfg_file.removesuffix('.neteditcfg')
     return cfg_file
 
-def load_params(parameters: str|dict, caller: str, step: int, params_name: str) -> dict:
+def load_params(parameters: str|dict, params_name: str|None = None, step: int|None = None) -> dict:
     """
     Load parameters file. Handles either dict or json file.
     :param parameters: Parameters dict or filepath
-    :param caller: Function calling load_params() (for error messages)
-    :param step: Current simulation step (for error messages)
     :param params_name: Parameter dict function (for error messages)
+    :param step: Current simulation step (for error messages)
     :return dict: Parameters dict
     """
-    
+
+    caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+    if step != None: caller = "(step {0}) {1}".format(step, caller)
+    if params_name == None: params_name = "parameter input"
+
     if not isinstance(parameters, (dict, str)):
-        raise TypeError("(step {0}) {1} [utils.load_params()]: Invalid {2} (must be [dict|filepath (str)], not '{3}').".format(step, caller, params_name, type(parameters).__name__))
+        raise TypeError("{0}: Invalid {1} (must be [dict|filepath (str)], not '{2}').".format(caller, params_name, type(parameters).__name__))
     elif isinstance(parameters, str) and parameters.endswith(".json"):
         if os.path.exists(parameters):
             with open(parameters, "r") as fp:
                 parameters = json.load(fp)
-        else: raise FileNotFoundError("(step {0}) {1} [utils.load_params()]: Parameters file '{2}' not found.".format(step, caller, parameters))
-    elif isinstance(parameters, str): raise ValueError("(step {0}) {1} [utils.load_params()]: Invalid parameters file '{2}' (must be '.json' file).".format(step, caller, parameters))
+        else: raise FileNotFoundError("{0}: Parameters file '{1}' not found.".format(caller, parameters))
+    elif isinstance(parameters, str): raise ValueError("{0}: Invalid parameters file '{1}' (must be '.json' file).".format(caller, parameters))
 
     return parameters
 

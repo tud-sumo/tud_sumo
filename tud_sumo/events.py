@@ -28,6 +28,8 @@ class EventScheduler:
 
         return schedule_dict
     
+    def __name__(self): return "EventScheduler"
+    
     def add_events(self, events):
 
         if isinstance(events, Event): self.scheduled_events[events.id] = events
@@ -37,7 +39,9 @@ class EventScheduler:
                 for event_id, event_params in events.items():
                     if isinstance(event_params, Event): self.scheduled_events[event_id] = event_params
                     elif isinstance(event_params, dict): self.scheduled_events[event_id] = Event(event_id, event_params, self.sim)
-                    else: raise TypeError("(step {0}) EventScheduler.init(): Invalid event_params dict (must contain [dict|Event], not '{1}').".format(self.sim.curr_step, type(event_params).__name__))
+                    else:
+                        desc = "Invalid event_params dict (must contain [dict|Event], not '{0}').".format(type(event_params).__name__)
+                        raise_error(TypeError, desc, self.sim.curr_step)
 
             elif isinstance(events, str):
                 if events.endswith(".json"):
@@ -46,14 +50,19 @@ class EventScheduler:
                             events = json.load(fp)
                         for event_id, event_params in events.items():
                             self.scheduled_events[event_id] = Event(event_id, event_params, self.sim)
-                    else: raise FileNotFoundError("(step {0}) EventScheduler.init(): Event parameters file '{1}' not found.".format(self.sim.curr_step, events))
-                else: raise ValueError("(step {0}) EventScheduler.init(): Event junction parameters file '{1}' (must be '.json' file).".format(self.sim.curr_step, events))
+                    else:
+                        desc = "Event parameters file '{0}' not found.".format(events)
+                        raise_error(FileNotFoundError, desc, self.sim.curr_step)
+                else:
+                    desc = "Event junction parameters file '{0}' (must be '.json' file).".format(events)
+                    raise_error(ValueError, desc, self.sim.curr_step)
                 
             elif hasattr(events, "__iter__") and all([isinstance(event, Event) for event in events]):
                 for event in events: self.scheduled_events[event.id] = event
             
             else:
-                raise TypeError("(step {0}) EventScheduler.init(): Invalid event_params (must be [dict|filepath|(Event)], not '{1}').".format(self.sim.curr_step, type(events).__name__))
+                desc = "Invalid event_params (must be [dict|filepath|(Event)], not '{0}').".format(type(events).__name__)
+                raise_error(TypeError, desc, self.sim.curr_step)
 
     def update_events(self):
         
@@ -80,18 +89,25 @@ class Event:
         self.sim = sim
 
         if not isinstance(event_params, dict) and not isinstance(event_params, str):
-            raise TypeError("(step {0}) Event.init(): Invalid event_params (must be [dict|filepath (str)], not '{1}').".format(self.sim.curr_step, type(event_params).__name__))
+            desc = "Invalid event_params (must be [dict|filepath (str)], not '{0}').".format(type(event_params).__name__)
+            raise_error(TypeError, desc, self.sim.curr_step)
         elif isinstance(event_params, str):
             if event_params.endswith(".json"):
                 if os.path.exists(event_params):
                     with open(event_params, "r") as fp:
                         event_params = json.load(fp)
-                else: raise FileNotFoundError("(step {0}) Event.init(): Event parameters file '{1}' not found.".format(self.sim.curr_step, event_params))
-            else: raise ValueError("(step {0}) Event.init(): Event junction parameters file '{1}' (must be '.json' file).".format(self.sim.curr_step, event_params))
+                else:
+                    desc = "Event parameters file '{0}' not found.".format(event_params)
+                    raise_error(FileNotFoundError, desc, self.sim.curr_step)
+            else:
+                desc = "Event junction parameters file '{0}' (must be '.json' file).".format(event_params)
+                raise_error(ValueError, desc, self.sim.curr_step)
 
         if "start_time" in event_params.keys(): self.start_time = event_params["start_time"] / self.sim.step_length
         elif "start_step" in event_params.keys(): self.start_time = event_params["start_step"]
-        else: raise KeyError("(step {0}) Event.init(): Event 'start_time' is not given and is required.".format(self.curr_step))
+        else:
+            desc = "Event 'start_time' is not given and is required."
+            raise_error(KeyError, desc, self.sim.curr_step)
 
         if "end_time" in event_params.keys():
             self.end_time = event_params["end_time"] / self.sim.step_length
@@ -105,11 +121,13 @@ class Event:
             self.end_time = math.inf
 
         if "edge" not in event_params.keys() and "vehicle" not in event_params.keys():
-            raise KeyError("(step {0}) Event.init(): Neither 'edge' or 'vehicle' parameters are given and one or both is required.".format(self.curr_step))
+            desc = "Neither 'edge' or 'vehicle' parameters are given and one or both is required."
+            raise_error(KeyError, desc, self.sim.curr_step)
         
         if "edge" in event_params.keys():
             if "actions" not in event_params["edge"].keys() and "egde_ids" not in event_params["edge"].keys():
-                raise KeyError("(step {0}) Event.init(): Edge events require 'actions' and 'edge_ids' parameters.".format(self.curr_step))
+                desc = "Edge events require 'actions' and 'edge_ids' parameters."
+                raise_error(KeyError, desc, self.sim.curr_step)
             
             self.edge_ids = event_params["edge"]["edge_ids"]
             self.e_actions, self.e_base = event_params["edge"]["actions"], {}
@@ -118,7 +136,8 @@ class Event:
 
         if "vehicle" in event_params.keys():
             if "actions" not in event_params["vehicle"].keys() and "locations" not in event_params["vehicle"].keys():
-                raise KeyError("(step {0}) Event.init(): Vehicle events require 'actions' and 'locations' parameters.".format(self.curr_step))
+                desc = "Vehicle events require 'actions' and 'locations' parameters."
+                raise_error(KeyError, desc, self.sim.curr_step)
             
             self.locations = event_params["vehicle"]["locations"]
             
@@ -154,6 +173,8 @@ class Event:
                                      "effect_duration": self.v_effect_dur, "n_affected": self.total_affected_vehicles}
             
         return event_dict
+    
+    def __name__(self): return "Event"
 
     def start(self):
 
@@ -190,7 +211,10 @@ class Event:
                         new_vehicles += self.sim.get_last_step_geometry_vehicles(location, v_types = self.v_types, flatten = True)
                     elif self.sim.detector_exists(location) != None:
                         new_vehicles += self.sim.get_last_step_detector_vehicles(location, v_types = self.v_types, flatten = True)
-                    else: raise KeyError("(step {0}) Event.run(): Object '{0}' has unknown type (must be detector or geometry ID).".format(self.sim.curr_step, location))
+                    else:
+                        desc = "Object '{0}' has unknown type (must be detector or geometry ID).".format(location)
+                        raise_error(KeyError, desc, self.sim.curr_step)
+                        
                 new_vehicles = list(set(new_vehicles))
                 new_vehicles = [vehicle_id for vehicle_id in new_vehicles if vehicle_id not in self.affected_vehicles.keys()]
 
