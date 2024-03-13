@@ -13,6 +13,10 @@ class Controller(Enum):
     METER = 3
 
 def raise_error(error, desc, curr_sim_step=None):
+    caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+    error_msg = "{0}: {1}".format(caller, desc)
+    if curr_sim_step != None: error_msg = "(step {0}) ".format(curr_sim_step) + error_msg
+    raise error(error_msg)
     try:
         caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
         error_msg = "{0}: {1}".format(caller, desc)
@@ -20,7 +24,7 @@ def raise_error(error, desc, curr_sim_step=None):
         raise error(error_msg)
     except Exception:
         print("tud_sumo: An unknown error occurred.")
-        exit()
+        raise KeyError("no")
 
 def raise_warning(desc, curr_sim_step=None):
     caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
@@ -30,8 +34,7 @@ def raise_warning(desc, curr_sim_step=None):
 
 def convert_time_units(time_vals, unit, step_len):
     if not isinstance(time_vals, list): time_vals = [time_vals]
-    if unit == "steps": return time_vals
-    elif unit == "s" and step_len != None:
+    if unit == "s" and step_len != None:
         time_vals = [val * step_len for val in time_vals]
     elif unit == "m" and step_len != None:
         time_vals = [(val * step_len)/60 for val in time_vals]

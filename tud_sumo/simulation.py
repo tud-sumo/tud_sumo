@@ -58,7 +58,7 @@ class Simulation:
 
     def __name__(self): return "Simulation"
 
-    def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, cmd_options: list|None = None, units: int = 1, get_individual_vehicle_data: bool = True, suppress_warnings: bool = False, ignore_TraCI_err: bool = False, seed: int|None = None, gui: bool = False) -> None:
+    def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, cmd_options: list|None = None, units: int = 1, get_individual_vehicle_data: bool = True, suppress_warnings: bool = False, ignore_TraCI_err: bool = False, seed: str|None = None, gui: bool = False) -> None:
         """
         Intialises SUMO simulation.
         :param config_file: Location of '.sumocfg' file (can be given instead of net_file)
@@ -96,13 +96,13 @@ class Simulation:
         
         if cmd_options != None: sumoCMD += cmd_options
 
-        if isinstance(seed, int): sumoCMD += ["--seed", seed]
-        elif hasattr(seed, '__call__') and seed.__name__ in ['random', 'randint']:
+        if isinstance(seed, str): sumoCMD += ["--seed", seed]
+        """elif (isinstance(seed, str) and seed == "random") or (hasattr(seed, '__call__') and seed.__name__ in ['random', 'randint']):
             sumoCMD += ["--random"]
             self.seed = "random"
         elif seed != None:
             desc = "Invalid seed type '{0}' (must be [int|random.randint()|random.random()]).".format(type(seed).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+            raise_error(TypeError, desc, self.curr_step)"""
         
         self.seed = seed
 
@@ -641,8 +641,8 @@ class Simulation:
             junc_phase = self.junc_phases[junc_id]
 
             for t in junc_phase["times"]:
-                if t <= self.step_length:
-                    desc = "Invalid phase duration (phase_dur ({0}) <= resolution ({1})).".format(t, self.step_length)
+                if t < self.step_length:
+                    desc = "Invalid phase duration (phase_dur ({0}) < resolution ({1}))\n.  - {2}".format(t, self.step_length, junc_phase)
                     raise_error(ValueError, desc, self.curr_step)
 
             if "curr_phase" not in junc_phase.keys(): junc_phase["curr_phase"] = start_phase
@@ -684,61 +684,67 @@ class Simulation:
         
         self.set_phases(junc_phases, overwrite=False)
 
-    def set_tl_metering_rate(self, junction_id: str|int, flow_rate: int|float, control_interval: int = 60, min_red: int|float = 1, y_dur: int|float = 1, green_time: int|float = 1) -> dict:
+    def set_tl_metering_rate(self, rm_id: str|int, metering_rate: int|float, g_time: int|float = 1, y_time: int|float = 1, min_red: int|float = 1, control_interval: int = 60) -> dict:
         """
-        Set ramp metering rate by flow at a junction. Uses a one-car-per-green policy, with a default 1s green phase duration.
-        :param junction_id: Junction ID
-        :param flow_rate: On-ramp inflow (veh/hr)
-        :param control_interval: Ramp meter control interval (s) (cycle length // control_interval == 0)
-        :param min_red: Minimum red duration (s)
-        :param y_dur: Yellow phase duration (s)
-        :param green_time: Green phase duration, defaults to 1s (s)
-        :return dict: Phase dictionary
+        Set ramp metering rate of a meter at a junction. Uses a one-car-per-green policy with a default
+        1s green and yellow time, with red phase duration changed to set flow. All phase durations must
+        be larger than the simulation step length.
+        :param rm_id:            Ramp meter (junction) ID
+        :param metering_rate:    On-ramp inflow in veh/hr (from all lanes)
+        :param g_time:           Green phase duration (s), defaults to 1
+        :param y_time:           Yellow phase duration (s), defaults to 1
+        :param min_red:          Minimum red phase duration (s), defaults to 1
+        :param control_interval: Ramp meter control interval (s) (control interval % cycle length = 0)
+        :return dict:            Resulting phase dictionary
         """
+        
+        if min([g_time, y_time, min_red]) <= self.step_length:
+            desc = "Green ({0}), yellow ({1}) and minimum red ({2}) times must all be greater than sim step length ({3}).".format(g_time, y_time, min_red, self.step_length)
 
-        if junction_id not in list(traci.trafficlight.getIDList()):
-            desc = "Junction with ID '{0}' does not exist, or it does not have a traffic light.".format(junction_id)
+        if rm_id not in list(traci.trafficlight.getIDList()):
+            desc = "Junction with ID '{0}' does not exist, or it does not have a traffic light.".format(rm_id)
             raise_error(KeyError, desc, self.curr_step)
         else:
-            if junction_id in self.tracked_juncs.keys():
-                m_len = self.tracked_juncs[junction_id].m_len
+            if rm_id in self.tracked_juncs.keys():
+                m_len = self.tracked_juncs[rm_id].m_len
             else:
-                state_str = traci.trafficlight.getRedYellowGreenState(junction_id)
+                state_str = traci.trafficlight.getRedYellowGreenState(rm_id)
                 m_len = len(state_str)
 
-        if self.track_juncs and junction_id in self.tracked_juncs.keys():
-            self.tracked_juncs[junction_id].metering_rates.append(flow_rate)
-            self.tracked_juncs[junction_id].rate_times.append(self.curr_step)
+        if self.track_juncs and rm_id in self.tracked_juncs.keys():
+            self.tracked_juncs[rm_id].metering_rates.append(metering_rate)
+            self.tracked_juncs[rm_id].rate_times.append(self.curr_step)
 
-        if min_red < self.step_length:
-            if not self.suppress_warnings: raise_warning("Minimum red duration ({0}s) is being set to step length ({1}s).".format(min_red, self.step_length), self.curr_step)
-            min_red = self.step_length
-
-        if flow_rate > 0:
-            # veh/s
-            flow_ps = flow_rate / 3600
-            # veh/control_interval
-            flow_pc = flow_ps * control_interval
-            
-            cycle_length = control_interval / flow_pc
-
-            red_time = cycle_length - green_time - y_dur
-            if red_time < min_red or red_time <= 0:
-                phases_dict = {"phases": ['G'*m_len], "times": [cycle_length]}
-
-            else:
-                phases_dict = {"phases": ['G'*m_len, 'y'*m_len, 'r'*m_len],
-                            "times":  [green_time / self.step_length, y_dur / self.step_length, red_time / self.step_length]}
-                
-        elif flow_rate == 0:
-            phases_dict = {"phases": ['R'*m_len], "times": [math.inf]}
+        max_flow = (3600 / (g_time + y_time + min_red)) * m_len
         
-        else:
-            desc = "Flow rate ({0}) must be above 0.".format(flow_rate)
+        # With one lane and a g_time, y_time and min_red of 1s, the meter cannot physically release
+        # more than 1200 veh/hr without reducing minimum red. So, to stop the meter continually
+        # flipping from g-y-r, the meter is set to green for the whole control interval.
+
+        # This maximum flow is increased with 2 (or more) lanes as, even with 1s green time, this essentially
+        # becomes a two-car-per-green policy, and so the maximum flow is doubled.
+        if metering_rate > max_flow:
+            phases_dict = {"phases": ["G"*m_len], "times": [control_interval/self.step_length]}
+        elif metering_rate == 0:
+            phases_dict = {"phases": ["r"*m_len], "times": [control_interval/self.step_length]}
+        elif metering_rate < 0:
+            desc = "Metering rate must be greater than 0 (set to '{0}').".format(metering_rate)
             raise_error(ValueError, desc, self.curr_step)
+        else:
 
-        self.set_phases({junction_id: phases_dict}, overwrite=False)
-        
+            # vehs_per_ci = vehicles released/control interval/lane
+            vehs_per_ci = ((metering_rate * control_interval) / 3600) / m_len
+            
+            # red time calculated with the number of cycles per control interval, minus g + y time
+            cycle_length = control_interval / vehs_per_ci
+            red_time = cycle_length - g_time - y_time
+
+            # Control interval should be divisible by resulting cycle length as below!
+            # sum(phase["times"])/self.step_length * vehs_per_ci == control_interval / self.step_length
+            phases_dict = {"phases": ["G"*m_len, "y"*m_len, "r"*m_len],
+                        "times":  [g_time / self.step_length, y_time / self.step_length, red_time / self.step_length]}
+            
+        self.set_phases({rm_id: phases_dict}, overwrite=False)
         return phases_dict
 
     def change_phase(self, junction_id: str|int, phase_no: int) -> None:

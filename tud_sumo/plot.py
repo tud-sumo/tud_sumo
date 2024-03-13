@@ -1,4 +1,5 @@
 import json, math, csv, matplotlib.pyplot as plt, numpy as np
+import matplotlib
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import os.path
 from copy import deepcopy
@@ -6,7 +7,8 @@ from simulation import Simulation
 from utils import *
 
 default_labels = {"no_vehicles": "No. of Vehicles", "tts": "Total Time Spent (s)", "delay": "Delay (s)",
-                  "veh_counts": "No. of Vehicles", "occupancies": "Occupancy (%)", "densities": "Density unit"}
+                  "veh_counts": "No. of Vehicles", "occupancies": "Occupancy (%)", "densities": "Density unit",
+                  "nc": "No Control", "alinea": "ALINEA", "lppo": "Local PPO", "cppo": "Coordinated PPO"}
 
 default_titles = {"no_vehicles": "Number of Vehicles", "tts": "Total Time Spent", "delay": "Delay",
                   "veh_counts": "Number of Vehicles", "occupancies": "Vehicle Occupancies", "densities": "Vehicle Density",
@@ -75,7 +77,12 @@ class Plotter:
     def __name__(self):
         return "Plotter"
     
-    def display_figure(self, filename: str|None=None) -> None:
+    def display_figure(self, filename: str|None=None, save_dpi: int=600) -> None:
+        """
+        Display figure, either saving to file or showing on screen.
+        :param filename: Save file name, if saving
+        :param save_dpi: Plot image dpi, if saving
+        """
 
         if filename is None: plt.show()
         else:
@@ -88,6 +95,8 @@ class Plotter:
                 raise FileExistsError("Plotter.display_figure() File '{0}' already exists.".format(fp))
             
             plt.savefig(fp, dpi=600)
+
+        plt.close()
         
     def plot_junc_flows(self, junc_id: str, vtypes: list|tuple|None=None, plot_n_vehicles: bool=False, plot_all: bool=True, save_fig: str|None=None) -> None:
         """
@@ -519,18 +528,19 @@ class Plotter:
         fig.tight_layout()
         self.display_figure(save_fig)
 
-    def plot_rm_queuing(self, rm_id: str, ax=None, yax_labels: bool|list|tuple=True, xax_labels: bool=True, plot_delay: bool=True, time_range: list|tuple|None=None, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_rm_queuing(self, rm_id: str, ax=None, yax_labels: bool|list|tuple=True, xax_labels: bool=True, plot_delay: bool=True, cumulative_delay: bool=False, time_range: list|tuple|None=None, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot ramp metering rate.
-        :param rm_id:       Ramp meter junction ID
-        :param ax:          Matplotlib axis, used when creating subplots
-        :param yax_labels:  Bool denoting whether to include y-axis labels (for subplots). Either single bool for both y-axis labels or list of two bools to set both y-axes (when plotting delay).
-        :param xax_labels:  Bool denoting whether to include x-axis labels (for subplots)
-        :param plot_delay:  Bool denoting whether to plot queue delay. This will be done on the same plot with a separate y-axis.
-        :param time_range:  Plotting time range (in plotter class units)
-        :param show_events: Bool denoting whether to plot events on all axes
-        :param fig_title:   If given, will overwrite default title
-        :param save_fig:    Output image filename, will show image if not givenr
+        :param rm_id:            Ramp meter junction ID
+        :param ax:               Matplotlib axis, used when creating subplots
+        :param yax_labels:       Bool denoting whether to include y-axis labels (for subplots). Either single bool for both y-axis labels or list of two bools to set both y-axes (when plotting delay).
+        :param xax_labels:       Bool denoting whether to include x-axis labels (for subplots)
+        :param plot_delay:       Bool denoting whether to plot queue delay. This will be done on the same plot with a separate y-axis.
+        :param cumulative_delay: Bool denoting whether to plot cumulative delay
+        :param time_range:       Plotting time range (in plotter class units)
+        :param show_events:      Bool denoting whether to plot events on all axes
+        :param fig_title:        If given, will overwrite default title
+        :param save_fig:         Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -580,7 +590,8 @@ class Plotter:
         if not is_subplot or fig_title != None:
             if not isinstance(fig_title, str):
                 default_title = "{0}'{1}' Queue Lengths".format(self.sim_label, rm_id)
-                if plot_delay: default_title += " & Cumulative Delay"
+                if plot_delay and cumulative_delay: default_title += " & Cumulative Delay"
+                elif plot_delay: default_title += " & Delay"
                 fig_title = default_title
             ax1.set_title(fig_title, pad=20)
 
@@ -595,13 +606,14 @@ class Plotter:
         
             colour = 'tab:red'
             data_time_vals, queue_delays = limit_vals_by_range(all_data_time_vals, queue_delays, time_range)
-            queue_delays = get_cumulative_arr(queue_delays)
+            if cumulative_delay: queue_delays = get_cumulative_arr(queue_delays)
             ax2 = ax1.twinx()
 
             ax2.plot(data_time_vals, queue_delays, linewidth=1.5, zorder=3, color=colour)
             ax2.tick_params(axis='y', labelcolor=colour)
             if (isinstance(yax_labels, bool) and yax_labels) or (isinstance(yax_labels, (list, tuple)) and len(yax_labels) == 2 and yax_labels[1]):
-                ax2.set_ylabel("Cumulative Delay (s)", color=colour)
+                if cumulative_delay: ax2.set_ylabel("Cumulative Delay (s)", color=colour)
+                else: ax2.set_ylabel("Delay (s)", color=colour)
             else: TypeError("Plotter.plot_rm_queuing(): Invalid yax_label, must be bool or list of 2 bools denoting each axis.")
             ax2.set_ylim([0, get_axis_lim(queue_delays)])
 
@@ -630,7 +642,7 @@ class Plotter:
         if len(rm_ids) == 1:
             if plot_queuing:
                 fig, (ax, ax2) = plt.subplots(1, 2, figsize=(fig_dimensions*2, fig_dimensions))
-                self.plot_rm_queuing(rm_ids[0], ax2, True, True, True, time_range, show_events, fig_title="Queue Lengths & Delays")
+                self.plot_rm_queuing(rm_ids[0], ax2, True, True, True, False, time_range, show_events, fig_title="Queue Lengths & Delays")
             else: fig, ax = plt.subplots(1, 1, figsize=(fig_dimensions*2, fig_dimensions))
             self.plot_rm_rate(rm_ids[0], ax,
                                     yax_labels=True, xax_labels=True,
@@ -654,7 +666,7 @@ class Plotter:
                                         fig_title=rm_id)
                 
                 if plot_queuing:
-                    self.plot_rm_queuing(rm_id, axes[1][idx], (idx==0, idx==len(rm_ids)-1), True, True, time_range, show_events, "")
+                    self.plot_rm_queuing(rm_id, axes[1][idx], (idx==0, idx==len(rm_ids)-1), True, True, False, time_range, show_events, "")
 
         def_title = "Ramp Metering Rates"
         if plot_queuing: def_title += " & Queuing Data"
@@ -664,82 +676,98 @@ class Plotter:
         fig.tight_layout()
         self.display_figure(save_fig)
 
-    def plot_vehicle_detector_data(self, dataset: str|list|tuple, save_fig: str|None=None) -> None:
+    def plot_vehicle_data(self, data_key: str, plot_cumulative: bool=False, time_range: list|tuple|None=None, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
-        Plots all collected vehicle or detector data.
-        :param dataset:  Dataset key (either "vehicle" or ["detector", detector_id])
-        :param save_fig: Output image filename, will show image if not given
+        Plot network-wide vehicle data.
+        :param data_key:        Data key to plot, either "no_vehicles", "tts" or "delay"
+        :param plot_cumulative: Bool denoting whether to plot cumulative values
+        :param time_range:      Plotting time range (in plotter class units)
+        :param show_events:     Bool denoting whether to plot when events occur
+        :param fig_title:       If given, will overwrite default title
+        :param save_fig:        Output image filename, will show image if not given
         """
 
         if self.simulation != None:
             self.sim_data = self.simulation.all_data
             self.units = self.simulation.units.name
 
-        if isinstance(dataset, str): # Sim data
-            if dataset in self.sim_data["data"].keys(): data = self.sim_data["data"][dataset]
-            else: raise KeyError("Plotter.plot_vehicle_detector_data(): Unrecognised dataset key '{0}'.".format(dataset))
-            title = self.sim_label + dataset.title() + " Data"
-        elif isinstance(dataset, (list, tuple)): # Detector data
-            data = self.sim_data["data"]
-            if "detector" not in data.keys():
-                raise KeyError("Plotter.plot_vehicle_detector_data(): No detector data to plot.")
-            for key in dataset:
-                if key in data.keys(): data = data[key]
-                else: raise KeyError("Plotter.plot_vehicle_detector_data(): Unrecognised dataset key '{0}'.".format(dataset[-1]))
-            title = self.sim_label + ': '.join(dataset)
+        if data_key not in ["no_vehicles", "tts", "delay"]:
+            raise KeyError("Plotter.plot_vehicle_data(): Unrecognised data key '{0}' (must be [no_vehicles|tts|delay]).".format(data_key))
 
-        else: raise TypeError("Plotter.plot_vehicle_detector_data(): Invalid dataset key type (must be [int|str], not '{0}').".format(type(dataset).__name__))
+        fig, ax = plt.subplots(1, 1)
+        start, step = self.sim_data["start"], self.sim_data["step_len"]
 
-        plot_data = {key: data[key] for key in data if key in default_labels and len(data[key]) != 0}
-        fig, axes = plt.subplots(len(plot_data))
-        start, end, step = self.sim_data["start"], self.sim_data["end"], self.sim_data["step_len"]
+        y_vals = self.sim_data["data"]["vehicle"][data_key]
+        if plot_cumulative: y_vals = get_cumulative_arr(y_vals)
+        x_vals = get_time_steps(y_vals, self.sim_time_units, step, start)
+        x_vals, y_vals = limit_vals_by_range(x_vals, y_vals, time_range)
 
-        for idx, (ax, (data_key, data_vals)) in enumerate(zip(axes, plot_data.items())):
-            if not isinstance(data_vals, list): continue
-            ax.plot([x * step for x in range(start, end)], data_vals, zorder=3)
-            ax.set_title(data_key)
-            if data_key in default_labels.keys(): ax.set_ylabel(default_labels[data_key])
-            if idx < len(axes) - 1:
-                if idx == 0: ax.set_title(title)
-                ax.tick_params('x', labelbottom=False)
-            else: ax.set_xlabel('Simulation Time (s)')
-            ax.set_xlim([start * step, (end - 1) * step])
-            ax.set_ylim([0, get_axis_lim(data_vals)])
-            ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+        ax.plot(x_vals, y_vals)
 
+        if fig_title == None:
+            fig_title = default_titles[data_key]
+            if plot_cumulative: fig_title = "Cumulative "+fig_title
+            fig_title = self.sim_label + fig_title
+        ax.set_title(fig_title, pad=20)
+
+        ax.set_xlabel(default_labels["sim_time"])
+        ax.set_ylabel(default_labels[data_key])
+        ax.set_xlim([x_vals[0], x_vals[-1]])
+        ax.set_ylim([0, get_axis_lim(y_vals)])
+        ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+
+        if "events" in self.sim_data["data"].keys() and show_events:
+            if "completed" in self.sim_data["data"]["events"]:
+                self.plot_event(ax)
+        
         fig.tight_layout()
 
         self.display_figure(save_fig)
 
-    def plot_n_vehicles(self, cumulative: bool=True, show_events: bool=True, save_fig: str|None=None) -> None:
+    def plot_detector_data(self, detector_id: str, data_key: str, plot_cumulative: bool=False, time_range: list|tuple|None=None, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
-        Plot the number of vehicles in the system.
-        :param cumulative: Bool denoting whether values are displayed cumulatively
-        :param show_events: Bool denoting whether to plot when events occur
-        :param save_fig: Output image filename, will show image if not given
+        Plot detector data.
+        :param detector_id:     Detector ID
+        :param data_key:        Data key to plot, either "speeds", "veh_counts" or "occupancies"
+        :param plot_cumulative: Bool denoting whether to plot cumulative values
+        :param time_range:      Plotting time range (in plotter class units)
+        :param show_events:     Bool denoting whether to plot when events occur
+        :param fig_title:       If given, will overwrite default title
+        :param save_fig:        Output image filename, will show image if not given
         """
-
+        
         if self.simulation != None:
             self.sim_data = self.simulation.all_data
             self.units = self.simulation.units.name
 
-        no_vehicles = self.sim_data["data"]["vehicle"]["no_vehicles"]
-        data_vals = get_cumulative_arr(no_vehicles) if cumulative else no_vehicles
-        start, end, step = self.sim_data["start"], self.sim_data["end"], self.sim_data["step_len"]
-
         fig, ax = plt.subplots(1, 1)
+        start, step = self.sim_data["start"], self.sim_data["step_len"]
 
-        title, xlabel = "Number of Vehicles", "No. of Vehicles"
-        if cumulative:
-            title = "Cumulative "+title
-            xlabel = "Cumulative "+xlabel
-        fig.suptitle(self.sim_label + title)
+        if data_key not in ["speeds", "veh_counts", "occupancies"]:
+            raise KeyError("Plotter.plot_detector_data(): Unrecognised data key '{0}' (must be [speeds|veh_counts|occupancies]).".format(data_key))
+        elif detector_id not in self.sim_data["data"]["detector"].keys():
+            raise KeyError("Plotter.plot_detector_data(): Detector ID '{0}' not found.".format(detector_id))
+        elif data_key == "occupancy" and self.sim_data["data"]["detector"][detector_id]["type"] == "multientryexit":
+            raise ValueError("Plotter.plot_detector_data(): Multi-Entry-Exit Detectors ('{0}') do not measure '{1}'.".format(detector_id, data_key))
+        
+        y_vals = self.sim_data["data"]["detector"][detector_id][data_key]
+        if plot_cumulative: y_vals = get_cumulative_arr(y_vals)
+        x_vals = get_time_steps(y_vals, self.sim_time_units, step, start)
+        x_vals, y_vals = limit_vals_by_range(x_vals, y_vals, time_range)
 
-        ax.plot([x * step for x in range(start, end)], data_vals, zorder=3)
-        ax.set_xlim([start * step, (end - 1) * step])
-        ax.set_ylim([0, get_axis_lim(data_vals)])
+        ax.plot(x_vals, y_vals)
+
+        if fig_title == None:
+            fig_title = "{0} (Detector '{1}')".format(default_titles[data_key], detector_id)
+            if plot_cumulative: fig_title = "Cumulative "+fig_title
+            fig_title = self.sim_label + fig_title
+        ax.set_title(fig_title, pad=20)
+
         ax.set_xlabel(default_labels["sim_time"])
-        ax.set_ylabel(xlabel)
+        ax.set_ylabel(default_labels[data_key])
+        ax.set_xlim([x_vals[0], x_vals[-1]])
+        if data_key == "occupancies": ax.set_ylim([0, 100])
+        else: ax.set_ylim([0, get_axis_lim(y_vals)])
         ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
 
         if "events" in self.sim_data["data"].keys() and show_events:
@@ -812,7 +840,7 @@ class Plotter:
         inflows = get_cumulative_arr(inflows)
         outflows = get_cumulative_arr(outflows)
         start, end, step = self.sim_data["start"], self.sim_data["end"], self.sim_data["step_len"]
-        x_vals = [x * step for x in range(start, end)]
+        x_vals = get_time_steps(inflows, self.sim_time_units, step, start)
 
         fig, ax = plt.subplots(1, 1)
         fig_title = "{0}Cumulative Arrival-Departure Curve".format(self.sim_label) if not isinstance(fig_title, str) else fig_title
@@ -820,7 +848,7 @@ class Plotter:
         
         ax.plot(x_vals, inflows, label="Inflow", zorder=3)
         ax.plot(x_vals, outflows, label="Outflow", zorder=4)
-        ax.set_xlim([start * step, (end - 1) * step])
+        ax.set_xlim([x_vals[0], x_vals[-1]])
         ax.set_ylim([0, get_axis_lim(inflows)])
         ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
         ax.set_xlabel(default_labels["sim_time"])
@@ -1047,7 +1075,6 @@ class Plotter:
         edge_offset = 0
 
         y_scale = 1
-        x_vals, y_vals, speed_vals = [], [], []
         total_len = sum([self.sim_data["data"]["edges"][e_id]["length"] for e_id in edge_ids])
 
         if self.units in ["METRIC", "UK"]:
@@ -1059,39 +1086,44 @@ class Plotter:
 
         if time_range == None: time_range = [-math.inf, math.inf]
 
+        ordered_points = {}
         for e_id in edge_ids:
             if e_id not in self.sim_data["data"]["edges"].keys():
                 raise KeyError("Plotter.plot_space_time_diagram(): Edge '{0}' not found in tracked edges.".format(e_id))
             else: e_data = self.sim_data["data"]["edges"][e_id]
 
-            step_vehicles = e_data["step_vehicles"]
-            
-            edge_length = e_data["length"]
+            step_vehicles, edge_length = e_data["step_vehicles"], e_data["length"]
             start, step = e_data["init_time"], self.sim_data["step_len"]
 
             curr_step = start
-            curr_time = convert_time_units(curr_step, self.sim_time_units, step)
 
-            # Chane with new time unit settings! Also, currently will not plot anything
-            # if there is no time_range, which does not make any sense
             for step_data in step_vehicles:
+                curr_time = convert_time_units(curr_step, self.sim_time_units, step)
                 if curr_time <= time_range[1] and curr_time >= time_range[0]:
                     for veh_data in step_data:
-
-                        speed_vals.append(veh_data[1])
-                        x_vals.append(curr_time)
 
                         y_val = (veh_data[0] * edge_length) + edge_offset
                         if not upstream_at_top: y_val = total_len - y_val
                         y_val *= y_scale
-                        y_vals.append(y_val)
+
+                        if curr_step not in ordered_points.keys():
+                            ordered_points[curr_step] = [(y_val, veh_data[1])]
+                        else: ordered_points[curr_step].append((y_val, veh_data[1]))
+                        
                 elif curr_time > time_range[1]:
                     break
 
-                curr_step += step
-                curr_time = convert_time_units(curr_step, self.sim_time_units, step)
+                curr_step += 1
 
             edge_offset += edge_length
+
+        idxs = ordered_points.keys()
+        x_vals, y_vals, speed_vals = [], [], []
+        for idx in idxs:
+            x_vals += [convert_time_units(idx, self.sim_time_units, step)] * len(ordered_points[idx])
+            dist_speed = ordered_points[idx]
+            y_vals += [val[0] for val in dist_speed]
+            speed_vals += [val[1] for val in dist_speed]
 
         if len(x_vals) == 0 or len(y_vals) == 0:
             if time_range == None:
@@ -1136,196 +1168,3 @@ class Plotter:
             ax.axvline(event["end_time"] * self.sim_data["step_len"], color="red", alpha=0.4, linestyle='--')
 
             ax.text(event["start_time"] * self.sim_data["step_len"] + ((event["end_time"] - event["start_time"]) * self.sim_data["step_len"]/2), y_lim[1] * 0.9, event["id"], horizontalalignment='center', color="red")
-
-def compare_vehicle_data(scenarios_data, data_key, labels = None, colours = None, linestyles = None, linewidths = None, cumulative=False, fig_title: str|None=None, save_fig: str|None=None) -> None:
-
-    default_titles = {"no_vehicles": "Number of Vehicles", "c_no_vehicles": "Total Number of Vehicles",
-                      "tts": "Total Time Spent", "c_tts": "Cumulative Time Spent",
-                      "delay": "Vehicle Delay", "c_delay": "Total Vehicle Delay"}
-    if labels == None: labels = [dat["scenario_name"] for dat in scenarios_data]
-
-    fig, ax = plt.subplots(1, 1)
-
-    min_x, max_x, max_y = math.inf, -math.inf, -math.inf
-    for idx, (data, label) in enumerate(zip(scenarios_data, labels)):
-        start, end, step = data["start"], data["end"], data["step_len"]
-        plot_data = data["data"]["vehicle"][data_key]
-        if cumulative: plot_data = get_cumulative_arr(plot_data)
-        colour = None if colours == None else colours[idx]
-        linestyle = 'solid' if linestyles == None else linestyles[idx]
-        linewidth = 1 if linewidths == None else linewidths[idx]
-        ax.plot([x * step for x in range(start, end)], plot_data, label=label, color=colour, linestyle=linestyle, linewidth=linewidth)
-
-        min_x, max_x, max_y = min(min_x, start * step), max(max_x, end * step), max(max_y, max(plot_data))
-
-    ax.set_xlabel("Simulation Time (s)")
-    ax.set_ylabel(default_labels[data_key])
-    ax.set_xlim([min_x, max_x])
-    ax.set_ylim([0, get_axis_lim(max_y)])
-    ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
-
-    box = ax.get_position()
-    ax.set_position([box.x0, box.y0 + box.height * 0.1, box.width, box.height * 0.90])
-
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.14), fancybox=True, ncol=len(scenarios_data))
-    if fig_title == None:
-        if cumulative: fig_title = default_titles["c_"+data_key]
-        else: fig_title = default_titles[data_key]
-    if fig_title != "": ax.set_title(fig_title, pad=20)
-    
-    if save_fig is None: plt.show(block=True)
-    else: plt.savefig(save_fig)
-
-def plot_lppo_density(filename):
-    with open(filename, 'r') as fp:
-        reader = csv.reader(fp)
-
-        data = {}
-        for row in reader:
-            rm_id = row[1]
-            if rm_id not in data.keys():
-                data[rm_id] = {'densities': [], 'rewards': [], 'steps': []}
-            data[rm_id]['densities'].append(float(row[3]))
-            data[rm_id]['rewards'].append(float(row[2]))
-            data[rm_id]['steps'].append(int(row[0]))
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-    
-    min_t, max_t = math.inf, -math.inf
-    for rm_id, rm_data in data.items():
-        steps = convert_time_units(rm_data['steps'], "hr", 0.5)
-        min_t, max_t = min(min(steps), min_t), max(max(steps), max_t)
-        ax1.plot(steps, rm_data['densities'], label=rm_id, linewidth=1)
-        ax2.plot(steps, rm_data['rewards'], label=rm_id, linewidth=1)
-
-    ax1.set_title("Downstream Density")
-    ax1.set_xlabel("Simulation Time (hr)")
-    ax1.set_ylabel("Density (veh/km)")
-    ax1.set_xlim([min_t, max_t])
-    ax1.legend()
-    
-    ax2.set_title("Agent Reward")
-    ax2.set_xlabel("Simulation Time (hr)")
-    ax2.set_ylabel("Agent Reward")
-    ax2.set_xlim([min_t, max_t])
-    
-    fig.suptitle("Local PPO Scenario: Downstream Density & Agent Reward", fontweight='bold')
-    fig.tight_layout()
-    plt.show()
-
-def plot_cppo_density(filename):
-    with open(filename, 'r') as fp:
-        reader = csv.reader(fp)
-
-        densities, rewards, steps = [], [], []
-        for row in reader:
-            densities.append(float(row[2]))
-            rewards.append(float(row[1]))
-            steps.append(int(row[0]))
-
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 5))
-    
-    steps = convert_time_units(steps, "hr", 0.5)
-    min_t, max_t = min(min(steps), math.inf), max(max(steps), -math.inf)
-    ax1.plot(steps, densities, linewidth=1)
-    ax2.plot(steps, rewards, linewidth=1)
-
-    ax1.set_title("Mainline Density")
-    ax1.set_xlabel("Simulation Time (hr)")
-    ax1.set_ylabel("Density (veh/km)")
-    ax1.set_xlim([min_t, max_t])
-    
-    ax2.set_title("Agent Reward")
-    ax2.set_xlabel("Simulation Time (hr)")
-    ax2.set_ylabel("Agent Reward")
-    ax2.set_xlim([min_t, max_t])
-    
-    fig.suptitle("Coordinated PPO Scenario: Downstream Density & Agent Reward", fontweight='bold')
-    fig.tight_layout()
-    plt.show()
-
-if __name__ == "__main__":
-
-    if False:
-
-        for label, filename in zip(["No Control Scenario", "ALINEA", "Local PPO Scenario", "Coordinated PPO Scenario"], ["nc", "alinea", "lppo", "cppo"]):
-            if filename != "cppo": continue
-            print('loading '+filename)
-            plotter = Plotter("ramp_metering/new_net_test_"+filename+".json", sim_label=label, sim_time_units="hr")
-            print('loaded')
-            plotter.plot_n_vehicles()
-            plotter.plot_n_vehicles(False)
-            plotter.plot_space_time_diagram(['E1_0', 'E1_1', 'E2_0', 'E2_1', 'E2_2', 'E2_3', 'E3_0', 'E3_1', 'E3_2', 'E3_3', 'E4', 'E5_0', 'E5_1', 'E5_2', 'E5_3'], time_range=[0.06944444, 10000], fig_title=label)
-
-            if filename != "nc":
-                plotter.plot_rm_rate_queuing(["RM_E7", "RM_E12", "RM_E15"], True)
-                plotter.plot_rm_rate_detector_data(["RM_E7", "RM_E12", "RM_E15"], [["E7_down_occ_0", "E7_down_occ_1", "E7_down_occ_2"], ["E12_down_occ_0", "E12_down_occ_1", "E12_down_occ_2"], ["E15_down_occ_0", "E15_down_occ_1", "E15_down_occ_2"]], ["speeds", "occupancies"], data_titles=["Vehicle Speed", "Downstream Occupancy"], aggregate_data=20)
-            
-            if filename == "lppo" and os.path.exists("ramp_metering/lppo_densities.csv"):
-                plot_lppo_density("ramp_metering/lppo_densities.csv")
-            elif filename == "cppo" and os.path.exists("ramp_metering/cppo_densities.csv"): plot_cppo_density("ramp_metering/cppo_densities.csv")
-            print('finished plots\n')
-
-        #label = "Coordinated PPO Scenario"
-        #plotter = Plotter("../dev/data/m_ex/ALINEA/all_alinea.json", sim_label=label, sim_time_units="hr")
-        #plotter = Plotter("ramp_metering/new_net_test_cppo.json", sim_label=label, sim_time_units="hr")
-        #plotter.plot_rm_rate("RM_E15")
-        #plotter.plot_rm_rate_queuing(["RM_E7", "RM_E12", "RM_E15"], True)
-        #plotter.plot_space_time_diagram(['E1_0', 'E1_1', 'E2_0', 'E2_1', 'E2_2', 'E3_0', 'E3_1', 'E3_2', 'E4', 'E5_0', 'E5_1', 'E5_2', 'E5_3'], time_range=[200, 300], fig_title=label)#0.06944444, 10000], fig_title=label)
- 
-        #plotter.plot_rm_rate_detector_data(["RM_E15"], [["E15_down_occ_0", "E15_down_occ_1", "E15_down_occ_2"]], ["speeds", "occupancies"], data_titles=["Vehicle Speed", "Downstream Occupancy"], aggregate_data=30)
-        
-        #plotter.plot_rm_rate_detector_data(["RM_E7", "RM_E12", "RM_E15"], [["E7_down_occ_0", "E7_down_occ_1", "E7_down_occ_2"], ["E12_down_occ_0", "E12_down_occ_1", "E12_down_occ_2"], ["E15_down_occ_0", "E15_down_occ_1", "E15_down_occ_2"]], ["speeds", "occupancies"], data_titles=["Vehicle Speed", "Downstream Occupancy"], aggregate_data=30)
-
-
-    if True: # Plot Comparisons
-
-        fps = ["ramp_metering/test2/data/new_net_test_nc.json", "ramp_metering/test2/data/new_net_test_alinea.json", "ramp_metering/test2/data/new_net_test_lppo.json", "ramp_metering/test2/data/new_net_test_cppo.json"]
-        labels = ["No Control Scenario", "ALINEA Scenario", "Local PPO Agents Scenario", "Coordinated PPO Agents Scenario"]
-        datasets = []
-        for fp, label in zip(fps, labels):
-            plotter = Plotter(fp)
-            #plotter.plot_metering_rates(['RM_E7', 'RM_E15', 'RM_E12'], True, fig_title=label, time_range=[500, 10000])#, 'RM_E15', 'RM_E12'])
-
-            with open(fp, 'r') as file:
-                
-                dat = json.load(file)
-                datasets.append(dat)
-                print("loaded", fp)
-
-        #compare_vehicle_data(datasets, "no_vehicles", ["No Control", "ALINEA", "Local PPO", "Coordinated PPO"])
-        compare_vehicle_data(datasets, "tts", ["No Control", "ALINEA", "Local PPO", "Coordinated PPO"], cumulative=False)
-        compare_vehicle_data(datasets, "delay", ["No Control", "ALINEA", "Local PPO", "Coordinated PPO"], cumulative=False)
-
-
-    if False: # Plot Simulation Summaries
-
-        label = "ex_v2 ALINEA"
-        plotter = Plotter('alinea_sdcsd.json', sim_label=label)
-        print('loaded')
-        #plotter.plot_rm_rate('RM_E7', time_range=[500, 10000])
-        plotter.plot_rm_rate('RM_E15', time_range=[500, 10000])
-        plotter.plot_rm_rate('RM_E12', time_range=[500, 10000])
-        #plotter.plot_space_time_diagram(['E1_0', 'E1_1', 'E2_0', 'E2_1', 'E2_2', 'E3_0', 'E3_1', 'E3_2', 'E4', 'E5_0', 'E5_1', 'E5_2', 'E5_3'], time_range=[500, 10000], fig_title=label)
- 
-        exit()
-
-        label = "ex_v2 No Control"
-        plotter = Plotter('../dev/data/ex/alinea.json', sim_label=label, fig_save_loc="../dev/figs/ex_v2/")
-        print('loaded')
-        plotter.plot_metering_rates(['RM_E7', 'RM_E15', 'RM_E12'], True, save_fig="plt")
-        exit()
-        plotter.plot_n_vehicles(save_fig="n_vehicles")
-        plotter.plot_n_vehicles(False, save_fig="cumulative_n_vehicles")
-        plotter.plot_space_time_diagram(['E1_0', 'E1_1', 'E2_0', 'E2_1', 'E2_2', 'E3_0', 'E3_1', 'E3_2', 'E4', 'E5_0', 'E5_1', 'E5_2', 'E5_3'], time_range=[0, 10000], fig_title=label, save_fig="st")
- 
-    if False: # Plot controllers
-        plotter5 = Plotter("controller_demo.json")
-        #plotter.plot_cumulative_curve(["cw_ramp_inflow", "cw_rm_downstream"], ["cw_rm_upstream"], 15)
-        plotter5.plot_meter_queue_length("crooswijk_meter")
-
-        plotter5.plot_space_time_diagram(['321901470', '126729982', '126730069', '126730059', '509506847'])
-        plotter5.plot_vsl_data('vsl_0')
-        plotter5.plot_rg_data('rg_0')
-        plotter5.plot_rm_rate("crooswijk_meter")
-        
