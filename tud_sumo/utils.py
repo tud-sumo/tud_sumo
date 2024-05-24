@@ -2,6 +2,10 @@ import json, os, math, inspect, numpy as np
 from enum import Enum
 from datetime import datetime
 
+date_format = "%d/%m/%Y"
+time_format = "%H:%M:%S"
+datetime_format = "%d/%m/%Y, %H:%M:%S"
+
 class Units(Enum):
     METRIC = 1
     IMPERIAL = 2
@@ -51,7 +55,7 @@ def get_time_steps(data_vals, unit, step_len=None, start=0):
     return convert_time_units(time_vals, unit, step_len)
          
 def get_time_str():
-    date_str = datetime.now().strftime("%d/%m/%Y, %H:%M:%S")
+    date_str = datetime.now().strftime(datetime_format)
     return date_str
 
 def get_cumulative_arr(arr: list, start: int=0) -> list:

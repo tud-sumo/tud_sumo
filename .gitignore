@@ -1,7 +1,3 @@
-dist/*
-tud_sumo.egg-info/*
-pyproject.toml
-setup.py
 *.pyc
 *.pyo
 dev/*
@@ -10,3 +6,4 @@ tud_sumo/ramp_metering/*
 tud_sumo/ramp_metering/rm.py
 Wiki/*
 tud_sumo/rm_plot.py
+tud_sumo/examples/create_scenarios.py

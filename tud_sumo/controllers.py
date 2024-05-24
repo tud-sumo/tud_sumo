@@ -24,8 +24,6 @@ class VSLController:
         for geometry_id in self.geometry_ids:
             g_type = self.sim.geometry_exists(geometry_id)
             if g_type in ['EDGE', 'LANE']:
-                #print(traci.edge.getIDList(), geometry_id in traci.edge.getIDList())
-                #exit()
                 self.geometry[geometry_id] = {"g_type": g_type, "nc_speed_limit": self.sim.get_geometry_vals(geometry_id, "max_speed"), "avg_speeds": []}
             else:
                 desc = "Geometry ID '{0}' not found.".format(geometry_id)
@@ -158,8 +156,8 @@ class RGController:
             if not self.activated:
                 if new_target != None: self.target = new_target
 
-                if self.target in self.sim.all_edges: self.g_type = 'EDGE'
-                elif self.target in self.sim.all_routes: self.g_type = 'ROUTE'
+                if self.sim.geometry_exists(self.target) == 'EDGE': self.g_type = 'EDGE'
+                elif self.sim.route_exists(self.target) != None: self.g_type = 'ROUTE'
                 else:
                     desc = "Route or edge ID '{1}' not found".format(self.target)
                     raise_error(KeyError, desc, self.sim.curr_step)

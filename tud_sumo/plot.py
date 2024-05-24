@@ -8,7 +8,7 @@ from utils import *
 
 default_labels = {"no_vehicles": "No. of Vehicles", "tts": "Total Time Spent (s)", "delay": "Delay (s)",
                   "veh_counts": "No. of Vehicles", "occupancies": "Occupancy (%)", "densities": "Density unit",
-                  "nc": "No Control", "alinea": "ALINEA", "lppo": "Local PPO", "cppo": "Coordinated PPO"}
+                  "nc": "No Control", "alinea": "ALINEA", "lppo": "Local PPO", "cppo": "Coordinated PPO", "ppo": "Proximal Policy Optimisation (PPO)"}
 
 default_titles = {"no_vehicles": "Number of Vehicles", "tts": "Total Time Spent", "delay": "Delay",
                   "veh_counts": "Number of Vehicles", "occupancies": "Vehicle Occupancies", "densities": "Vehicle Density",
