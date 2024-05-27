@@ -120,42 +120,42 @@ class Event:
         else:
             self.end_time = math.inf
 
-        if "edge" not in event_params.keys() and "vehicle" not in event_params.keys():
-            desc = "Neither 'edge' or 'vehicle' parameters are given and one or both is required."
+        if "edges" not in event_params.keys() and "vehicles" not in event_params.keys():
+            desc = "Neither 'edges' or 'vehicles' parameters are given and one or both is required."
             raise_error(KeyError, desc, self.sim.curr_step)
         
-        if "edge" in event_params.keys():
-            if "actions" not in event_params["edge"].keys() and "egde_ids" not in event_params["edge"].keys():
+        if "edges" in event_params.keys():
+            if "actions" not in event_params["edges"].keys() and "egde_ids" not in event_params["edges"].keys():
                 desc = "Edge events require 'actions' and 'edge_ids' parameters."
                 raise_error(KeyError, desc, self.sim.curr_step)
             
-            self.edge_ids = event_params["edge"]["edge_ids"]
-            self.e_actions, self.e_base = event_params["edge"]["actions"], {}
+            self.edge_ids = event_params["edges"]["edge_ids"]
+            self.e_actions, self.e_base = event_params["edges"]["actions"], {}
 
         else: self.e_actions = None
 
-        if "vehicle" in event_params.keys():
-            if "actions" not in event_params["vehicle"].keys() and "locations" not in event_params["vehicle"].keys():
+        if "vehicles" in event_params.keys():
+            if "actions" not in event_params["vehicles"].keys() and "locations" not in event_params["vehicles"].keys():
                 desc = "Vehicle events require 'actions' and 'locations' parameters."
                 raise_error(KeyError, desc, self.sim.curr_step)
             
-            self.locations = event_params["vehicle"]["locations"]
+            self.locations = event_params["vehicles"]["locations"]
             
-            self.v_effect_dur = math.inf if "effect_dur" not in event_params["vehicle"].keys() else event_params["vehicle"]["effect_dur"]
-            self.v_actions, self.v_base, self.affected_vehicles = event_params["vehicle"]["actions"], {}, {}
+            self.v_effect_dur = math.inf if "effect_dur" not in event_params["vehicles"].keys() else event_params["vehicles"]["effect_dur"]
+            self.v_actions, self.v_base, self.affected_vehicles = event_params["vehicles"]["actions"], {}, {}
 
-            if "vehicle_types" in event_params["vehicle"].keys():
-                self.v_types = event_params["vehicle"]["vehicle_types"]
+            if "vehicle_types" in event_params["vehicles"].keys():
+                self.v_types = event_params["vehicles"]["vehicle_types"]
             else: self.v_types = None
 
-            self.v_prob = 1 if "effect_probability" not in event_params["vehicle"].keys() else event_params["vehicle"]["effect_probability"]
+            self.v_prob = 1 if "effect_probability" not in event_params["vehicles"].keys() else event_params["vehicles"]["effect_probability"]
             
-            if "vehicle_limit" in event_params["vehicle"].keys():
-                self.vehicle_limit, self.total_affected_vehicles = event_params["vehicle"]["vehicle_limit"], 0
+            if "vehicle_limit" in event_params["vehicles"].keys():
+                self.vehicle_limit, self.total_affected_vehicles = event_params["vehicles"]["vehicle_limit"], 0
             else:
                 self.vehicle_limit, self.total_affected_vehicles = math.inf, 0
 
-            self.highlight = None if "highlight" not in event_params["vehicle"].keys() else event_params["vehicle"]["highlight"]
+            self.highlight = None if "highlight" not in event_params["vehicles"].keys() else event_params["vehicles"]["highlight"]
 
             for data_key in ["acceleration", "lane_idx"]:
                 if data_key in self.v_actions.keys():
@@ -167,9 +167,9 @@ class Event:
 
         event_dict = {"id": self.id, "start_time": self.start_time, "end_time": self.end_time}
         if self.e_actions != None:
-            event_dict["edge"] = {"edge_ids": self.edge_ids, "actions": self.e_actions}
+            event_dict["edges"] = {"edge_ids": self.edge_ids, "actions": self.e_actions}
         if self.v_actions != None:
-            event_dict["vehicle"] = {"locations": self.locations, "actions": self.v_actions,
+            event_dict["vehicles"] = {"locations": self.locations, "actions": self.v_actions,
                                      "effect_duration": self.v_effect_dur, "n_affected": self.total_affected_vehicles}
             
         return event_dict

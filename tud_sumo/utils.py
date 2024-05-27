@@ -6,6 +6,8 @@ date_format = "%d/%m/%Y"
 time_format = "%H:%M:%S"
 datetime_format = "%d/%m/%Y, %H:%M:%S"
 
+unit_desc = {"METRIC": "Metric (km, km/h)", "UK": "UK (km, mph)", "IMPERIAL": "Imperial (miles, mph)"}
+
 class Units(Enum):
     METRIC = 1
     IMPERIAL = 2

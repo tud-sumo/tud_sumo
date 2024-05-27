@@ -5,6 +5,7 @@ from tqdm import tqdm
 
 sys.path.insert(0, '..')
 from simulation import Simulation
+from plot import Plotter
 
 if __name__ == "__main__":
 
@@ -12,7 +13,7 @@ if __name__ == "__main__":
     my_sim = Simulation(scenario_name="A20_ITCS", scenario_desc="Example traffic controllers, with a ramp meter, VSL controller and route guidance.")
 
     # Start the simulation, defining the sumo config files.
-    my_sim.start("../../dev/sumo_scenarios/a20/a20.sumocfg", get_individual_vehicle_data=False, gui=True)
+    my_sim.start("../../dev/sumo_scenarios/a20/a20.sumocfg", get_individual_vehicle_data=False, gui="-gui" in sys.argv)
 
     # Add a tracked junction to the intersection with ID "utsc", which will track signal phases/times.
     my_sim.add_tracked_junctions(["utsc"])
@@ -30,7 +31,7 @@ if __name__ == "__main__":
     # redirection point and a target edge/route ID to redirect drivers to. Can also define a diversion
     # percent to randomly divert only a percent of drivers, and a highlight colour for the SUMO gui, which
     # will highlight affected drivers.
-    my_sim.add_controllers({"rerouter": {"type": "RG", "detector_ids": ["rerouter_2"], "target": "urban_out", "diversion_pct": 0.25, "highlight": "00FF00"}})
+    my_sim.add_controllers({"rerouter": {"type": "RG", "detector_ids": ["rerouter_2"], "new_destination": "urban_out", "diversion_pct": 0.25, "highlight": "00FF00"}})
 
     # Add tracked edges. This will track some basic information, such as average speed etc, but can also
     # be used to create space-time diagrams as individual vehicle speeds and positions are tracked.

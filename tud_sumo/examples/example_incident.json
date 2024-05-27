@@ -2,7 +2,7 @@
     "incident": {
         "start_time": 200,
         "end_time": 450,
-        "edge": {
+        "edges": {
             "actions": {
                 "disallowed": [
                     "passenger",
@@ -22,7 +22,7 @@
     "incident_response": {
         "start_time": 250,
         "end_time": 450,
-        "vehicle": {
+        "vehicles": {
             "actions": {
                 "max_speed": 40
             },

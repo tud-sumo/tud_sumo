@@ -49,6 +49,7 @@ class Simulation:
         self._all_curr_vehicle_ids = set([])
         self._all_loaded_vehicle_ids = set([])
         self._known_vehicles = {}
+        self._trips = {"incomplete": {}, "complete": {}}
 
     def __str__(self):
         if self.scenario_name != None:
@@ -191,6 +192,8 @@ class Simulation:
 
         for controller in self.controllers.values():
             controller.reset()
+
+        self._trips = {"incomplete": {}, "complete": {}}
 
         self._sim_start_time = get_time_str()
         self.all_data = None
@@ -335,17 +338,18 @@ class Simulation:
             if self._seed == None: del all_data["seed"]
             else: all_data["seed"] = self._seed
 
-            if len(self.available_detectors) > 0: all_data["data"]["detector"] = {}
+            if len(self.available_detectors) > 0: all_data["data"]["detectors"] = {}
             if self.track_juncs: all_data["data"]["junctions"] = {}
             if len(self.tracked_edges) > 0: all_data["data"]["edges"] = {}
             if len(self.controllers) > 0: all_data["data"]["controllers"] = {}
-            all_data["data"]["vehicle"] = {}
+            all_data["data"]["vehicles"] = {}
+            all_data["data"]["trips"] = {"incomplete": {}, "complete": {}}
             if self._get_individual_vehicle_data: all_data["data"]["all_vehicles"] = []
             if self._scheduler != None: all_data["data"]["events"] = {}
         else: 
-            prev_steps = set([len(data_arr) for data_arr in prev_data["data"]["vehicle"].values()] +
-                            [len(detector_data["speeds"]) for detector_data in prev_data["data"]["detector"].values()] +
-                            [len(detector_data["veh_counts"]) for detector_data in prev_data["data"]["detector"].values()])
+            prev_steps = set([len(data_arr) for data_arr in prev_data["data"]["vehicles"].values()] +
+                            [len(detector_data["speeds"]) for detector_data in prev_data["data"]["detectors"].values()] +
+                            [len(detector_data["veh_counts"]) for detector_data in prev_data["data"]["detectors"].values()])
             
             if len(prev_steps) != 1:
                 desc = "Invalid prev_data (different length arrays)."
@@ -373,31 +377,34 @@ class Simulation:
             for controller in self.controllers.values(): controller.update()
             for edge in self.tracked_edges.values(): edge.update()
 
-            if len(all_data["data"]["detector"]) == 0:
+            if len(all_data["data"]["detectors"]) == 0:
                 for detector_id in detector_list:
-                    all_data["data"]["detector"][detector_id] = self.available_detectors[detector_id]
-                    all_data["data"]["detector"][detector_id].update({"speeds": [], "veh_counts": [], "veh_ids": [], "occupancies": []})
-                all_data["data"]["vehicle"] = {"no_vehicles": [], "tts": [], "delay": []}
+                    all_data["data"]["detectors"][detector_id] = self.available_detectors[detector_id]
+                    all_data["data"]["detectors"][detector_id].update({"speeds": [], "veh_counts": [], "veh_ids": [], "occupancies": []})
+                all_data["data"]["vehicles"] = {"no_vehicles": [], "tts": [], "delay": []}
 
-            for detector_id in last_step_data["detector"].keys():
-                if detector_id not in all_data["data"]["detector"].keys():
+            for detector_id in last_step_data["detectors"].keys():
+                if detector_id not in all_data["data"]["detectors"].keys():
                     desc = "Unrecognised detector ID found ('{0}').".format(detector_id)
                     raise_error(KeyError, desc, self.curr_step)
-                for data_key, data_val in last_step_data["detector"][detector_id].items():
-                    all_data["data"]["detector"][detector_id][data_key].append(data_val)
+                for data_key, data_val in last_step_data["detectors"][detector_id].items():
+                    all_data["data"]["detectors"][detector_id][data_key].append(data_val)
 
-            for data_key, data_val in last_step_data["vehicle"].items():
-                all_data["data"]["vehicle"][data_key].append(data_val)
+            for data_key, data_val in last_step_data["vehicles"].items():
+                all_data["data"]["vehicles"][data_key].append(data_val)
+
+            all_data["data"]["trips"] = self._trips
 
             if isinstance(pbar, tqdm):
                 pbar.update(1)
                 pbar.set_description("Running sim (step {0}, {1} vehs)".format(self.curr_step, len(self._all_curr_vehicle_ids)))
 
         if cumulative_data:
-            for detector_data in all_data["data"]["detector"].values():
+            for detector_data in all_data["data"]["detectors"].values():
                 detector_data["veh_counts"] = get_cumulative_arr(detector_data["veh_counts"], prev_steps)
-            all_data["data"]["vehicle"]["no_vehicles"] = get_cumulative_arr(all_data["data"]["vehicle"]["no_vehicles"], prev_steps)
-            all_data["data"]["vehicle"]["tts"] = get_cumulative_arr(all_data["data"]["vehicle"]["tts"], prev_steps)
+            all_data["data"]["vehicles"]["no_vehicles"] = get_cumulative_arr(all_data["data"]["vehicles"]["no_vehicles"], prev_steps)
+            all_data["data"]["vehicles"]["tts"] = get_cumulative_arr(all_data["data"]["vehicles"]["tts"], prev_steps)
+            all_data["data"]["vehicles"]["delay"] = get_cumulative_arr(all_data["data"]["vehicles"]["delay"], prev_steps)
 
         all_data["end"] = self.curr_step
         all_data["sim_end"] = get_time_str()
@@ -421,16 +428,47 @@ class Simulation:
         :return dict:         Simulation data
         """
 
-        data = {"detector": {}, "vehicle": {}}
+        data = {"detectors": {}, "vehicles": {}}
         if self.track_juncs: data["junctions"] = {}
         
         traci.simulationStep()
         time_diff = traci.simulation.getTime() - self._time_val
         self._time_val = traci.simulation.getTime()
 
+        all_prev_vehicle_ids = self._all_curr_vehicle_ids
         self._all_curr_vehicle_ids = set(traci.vehicle.getIDList())
         self._all_loaded_vehicle_ids = set(traci.vehicle.getLoadedIDList())
         self._all_to_depart_vehicle_ids = self._all_loaded_vehicle_ids - self._all_curr_vehicle_ids
+
+        all_vehicles_in = self._all_curr_vehicle_ids - all_prev_vehicle_ids
+        all_vehicles_out = all_prev_vehicle_ids - self._all_curr_vehicle_ids
+
+        for veh_id in all_vehicles_in:
+            veh_route = self.get_vehicle_vals(veh_id, "route_edges")
+            origin, destination = veh_route[0], veh_route[-1]
+            self._trips["incomplete"][veh_id] = {"departure": self.curr_step, "origin": origin, "destination": destination}
+
+        for veh_id in all_vehicles_out:
+            if veh_id in self._trips["incomplete"].keys():
+                trip_data = self._trips["incomplete"][veh_id]
+                departure, origin, destination = trip_data["departure"], trip_data["origin"], trip_data["destination"]
+                del self._trips["incomplete"][veh_id]
+                self._trips["complete"][veh_id] = {"departure": departure, "arrival": self.curr_step, "origin": origin, "destination": destination}
+            
+            else:
+                if veh_id in self._known_vehicles.keys():
+                    trip_data = {}
+                    if "departure" in self._known_vehicles[veh_id].keys():
+                        trip_data["departure"] = self._known_vehicles[veh_id]["departure"]
+                    if "arrival" in self._known_vehicles[veh_id].keys():
+                        trip_data["arrival"] = self._known_vehicles[veh_id]["arrival"]
+                    if "origin" in self._known_vehicles[veh_id].keys():
+                        trip_data["origin"] = self._known_vehicles[veh_id]["origin"]
+                    if "destination" in self._known_vehicles[veh_id].keys():
+                        trip_data["destination"] = self._known_vehicles[veh_id]["destination"]    
+                else: 
+                    desc = "Unrecognised vehicle ID '{0}' in completed trips.".format(veh_id)
+                    raise_error(KeyError, desc, self.curr_step)
 
         if self._junc_phases != None:
             update_junc_lights = []
@@ -452,32 +490,32 @@ class Simulation:
 
         if detector_list == None: detector_list = list(self.available_detectors.keys())
         for detector_id in detector_list:
-            data["detector"][detector_id] = {}
+            data["detectors"][detector_id] = {}
             if detector_id not in self.available_detectors.keys():
                 desc = "Unrecognised detector ID found ('{0}').".format(detector_id)
                 raise_error(KeyError, desc, self.curr_step)
             if self.available_detectors[detector_id]["type"] == "multientryexit":
 
                 detector_data = self.get_last_step_detector_data(detector_id, ["speed", "veh_count"])
-                data["detector"][detector_id]["speeds"] = detector_data["speed"]
-                data["detector"][detector_id]["veh_counts"] = detector_data["veh_count"]
+                data["detectors"][detector_id]["speeds"] = detector_data["speed"]
+                data["detectors"][detector_id]["veh_counts"] = detector_data["veh_count"]
                 
             elif self.available_detectors[detector_id]["type"] == "inductionloop":
 
                 detector_data = self.get_last_step_detector_data(detector_id, ["speed", "veh_count", "occupancy"])
-                data["detector"][detector_id]["speeds"] = detector_data["speed"]
-                data["detector"][detector_id]["veh_counts"] = detector_data["veh_count"]
-                data["detector"][detector_id]["occupancies"] = detector_data["occupancy"]
+                data["detectors"][detector_id]["speeds"] = detector_data["speed"]
+                data["detectors"][detector_id]["veh_counts"] = detector_data["veh_count"]
+                data["detectors"][detector_id]["occupancies"] = detector_data["occupancy"]
 
             else:
                 if not self._suppress_warnings: raise_warning("Unknown detector type '{0}'.".format(self.available_detectors[detector_id]["type"]), self.curr_step)
 
-            data["detector"][detector_id]["veh_ids"] = self.get_last_step_detector_vehicles(detector_id)
+            data["detectors"][detector_id]["veh_ids"] = self.get_last_step_detector_vehicles(detector_id)
 
         total_v_data, all_v_data = self.get_all_vehicle_data(types=vTypes)
-        data["vehicle"]["no_vehicles"] = total_v_data["no_vehicles"]
-        data["vehicle"]["tts"] = total_v_data["no_vehicles"] * self.step_length
-        data["vehicle"]["delay"] = total_v_data["no_waiting"] * self.step_length
+        data["vehicles"]["no_vehicles"] = total_v_data["no_vehicles"]
+        data["vehicles"]["tts"] = total_v_data["no_vehicles"] * self.step_length
+        data["vehicles"]["delay"] = total_v_data["no_waiting"] * self.step_length
 
         self.curr_step += 1
 
@@ -593,7 +631,7 @@ class Simulation:
         if self.all_data == None:
             desc = "No detector data as the simulation has not been run or data has been reset."
             raise_error(IndexError, desc, self.curr_step)
-        elif detector_id not in self.available_detectors.keys() or detector_id not in self.all_data["data"]["detector"].keys():
+        elif detector_id not in self.available_detectors.keys() or detector_id not in self.all_data["data"]["detectors"].keys():
             desc = "Detector with ID '{0}' not found.".format(detector_id)
             raise_error(KeyError, desc, self.curr_step)
 
@@ -601,11 +639,11 @@ class Simulation:
         if not isinstance(data_keys, (list, tuple)): data_keys = [data_keys]
         for data_key in data_keys:
             if data_key in ["veh_counts", "speeds", "occupancies"]:
-                if data_key in self.all_data["data"]["detector"][detector_id].keys():
-                    data_arr = self.all_data["data"]["detector"][detector_id][data_key][-n_steps:]
+                if data_key in self.all_data["data"]["detectors"][detector_id].keys():
+                    data_arr = self.all_data["data"]["detectors"][detector_id][data_key][-n_steps:]
                     if avg_vals: data_arr = sum(data_arr) / len(data_arr)
                 else:
-                    desc = "Detector '{0}' of type '{1}' does not collect '{2}' data.".format(detector_id, self.all_data["data"]["detector"][detector_id]["type"], data_key)
+                    desc = "Detector '{0}' of type '{1}' does not collect '{2}' data.".format(detector_id, self.all_data["data"]["detectors"][detector_id]["type"], data_key)
                     raise_error(KeyError, desc, self.curr_step)
             else:
                 desc = "Unrecognised data key ('{0}').".format(data_key)
@@ -891,7 +929,7 @@ class Simulation:
                         desc = "({0}): '{0}' requires 2 parameters (laneIndex [int], duration [int|float])".format(command)
                         raise_error(TypeError, desc, self.curr_step)
 
-                case "target":
+                case "destination":
                     if isinstance(value, str):
                         if value not in self._all_edges:
                             desc = "({0}): Edge ID '{1}' not found.".format(command, value)
@@ -930,7 +968,7 @@ class Simulation:
         """
         Get data values for specific vehicle using a list of data keys.
         :param vehicle_id: Vehicle ID
-        :param data_keys: List of keys from [type|length|speed|max_speed|acceleration|position|heading|ts|lane_idx|target|route_id|route_idx|route_edges], or single key
+        :param data_keys: List of keys from [type|length|speed|max_speed|acceleration|position|heading|departure|lane_idx|origin|route_id|route_idx|route_edges], or single key
         :return dict: Values by data_key (or single value)
         """
 
@@ -946,19 +984,22 @@ class Simulation:
             desc = "Invalid data_keys given '{0}' (must be [str|(str)], not '{1}').".format(data_keys, type(data_keys).__name__)
             raise_error(TypeError, desc, self.curr_step)
         
-        data_vals = {}
+        data_vals, vehicle_known = {}, vehicle_id in self._known_vehicles.keys()
         for data_key in data_keys:
             match data_key:
                 case "type":
-                    if vehicle_id not in self._known_vehicles.keys():
-                        data_vals[data_key] = traci.vehicle.getTypeID(vehicle_id)
-                    else: data_vals[data_key] = self._known_vehicles[vehicle_id]["type"]
+                    new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
+                    if not vehicle_known: self._known_vehicles[vehicle_id][vehicle_id] = {}
+                    if new_request: self._known_vehicles[vehicle_id][data_key] = traci.vehicle.getTypeID(vehicle_id)
+                    data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
                 case "length":
-                    if vehicle_id not in self._known_vehicles.keys():
+                    new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
+                    if not vehicle_known: self._known_vehicles[vehicle_id][vehicle_id] = {}
+                    if new_request:
                         length = traci.vehicle.getLength(vehicle_id)
                         if self.units.name == 'IMPERIAL': length *= 3.28084
-                        data_vals[data_key] = length
-                    else: data_vals[data_key] = self._known_vehicles[vehicle_id]["length"]
+                        self._known_vehicles[vehicle_id][data_key] = length
+                    data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
                 case "speed":
                     speed = traci.vehicle.getSpeed(vehicle_id)
                     if self.units.name in ['IMPERIAL', 'UK']: speed *= 2.2369362920544
@@ -975,12 +1016,21 @@ class Simulation:
                     data_vals[data_key] = traci.vehicle.getPosition3D(vehicle_id)
                 case "heading":
                     data_vals[data_key] = traci.vehicle.getAngle(vehicle_id)
-                case "ts":
-                    data_vals[data_key] = traci.vehicle.getDeparture(vehicle_id)
+                case "departure":
+                    new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
+                    if not vehicle_known: self._known_vehicles[vehicle_id][vehicle_id] = {}
+                    # Departure should be in steps (not seconds!) to avoid confusion when converting time units
+                    if new_request: self._known_vehicles[vehicle_id][data_key] = int(traci.vehicle.getDeparture(vehicle_id) / self.step_length)
+                    data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
                 case "lane_idx":
                     data_vals[data_key] = traci.vehicle.getLaneIndex(vehicle_id)
-                case "target":
+                case "destination":
                     data_vals[data_key] = list(traci.vehicle.getRoute(vehicle_id))[-1]
+                case "origin":
+                    new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
+                    if not vehicle_known: self._known_vehicles[vehicle_id][vehicle_id] = {}
+                    if new_request: self._known_vehicles[vehicle_id][data_key] = list(traci.vehicle.getRoute(vehicle_id))[0]
+                    data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
                 case "route_id":
                     data_vals[data_key] = traci.vehicle.getRouteID(vehicle_id)
                 case "route_idx":
@@ -1013,29 +1063,33 @@ class Simulation:
                 raise_warning("Unrecognised vehicle ID given ('{0}').".format(vehicle_id), self.curr_step)
                 return None
         
-        vehicle_data = self.get_vehicle_vals(vehicle_id, ("type", "speed", "position", "heading", "ts", "length"))
+        vehicle_data = self.get_vehicle_vals(vehicle_id, ("speed", "position", "heading", "destination"))
 
         if vehicle_id not in self._known_vehicles.keys():
-            self._known_vehicles[vehicle_id] = {"type":      vehicle_data["type"],
-                                               "longitude": vehicle_data["position"][0],
-                                               "latitude":  vehicle_data["position"][1],
-                                               "speed":     vehicle_data["speed"],
-                                               "stopped":   self.vehicle_is_stopped(vehicle_id, vehicle_data["speed"]),
-                                               "length":    vehicle_data["length"],
-                                               "heading":   vehicle_data["heading"],
-                                               "ts":        vehicle_data["ts"],
-                                               "altitude":  vehicle_data["position"][2],
-                                               "last_seen": self.curr_step
+            static_veh_data = self.get_vehicle_vals(vehicle_id, ("type", "length", "departure", "origin"))
+
+            self._known_vehicles[vehicle_id] = {"type":       static_veh_data["type"],
+                                               "longitude":   vehicle_data["position"][0],
+                                               "latitude":    vehicle_data["position"][1],
+                                               "speed":       vehicle_data["speed"],
+                                               "stopped":     self.vehicle_is_stopped(vehicle_id, vehicle_data["speed"]),
+                                               "length":      static_veh_data["length"],
+                                               "heading":     vehicle_data["heading"],
+                                               "departure":   static_veh_data["departure"],
+                                               "altitude":    vehicle_data["position"][2],
+                                               "destination": vehicle_data["destination"],
+                                               "origin":      static_veh_data["origin"],
+                                               "last_seen":   self.curr_step
                                               }
         else:
-            self._known_vehicles[vehicle_id]["speed"]     = vehicle_data["speed"]
-            self._known_vehicles[vehicle_id]["stopped"]   = self.vehicle_is_stopped(vehicle_id, vehicle_data["speed"])
-            self._known_vehicles[vehicle_id]["longitude"] = vehicle_data["position"][0]
-            self._known_vehicles[vehicle_id]["latitude"]  = vehicle_data["position"][1]
-            self._known_vehicles[vehicle_id]["heading"]   = vehicle_data["heading"]
-            self._known_vehicles[vehicle_id]["ts"]        = vehicle_data["ts"]
-            self._known_vehicles[vehicle_id]["altitude"]  = vehicle_data["position"][2]
-            self._known_vehicles[vehicle_id]["last_seen"] = self.curr_step
+            self._known_vehicles[vehicle_id]["speed"]       = vehicle_data["speed"]
+            self._known_vehicles[vehicle_id]["stopped"]     = self.vehicle_is_stopped(vehicle_id, vehicle_data["speed"])
+            self._known_vehicles[vehicle_id]["longitude"]   = vehicle_data["position"][0]
+            self._known_vehicles[vehicle_id]["latitude"]    = vehicle_data["position"][1]
+            self._known_vehicles[vehicle_id]["heading"]     = vehicle_data["heading"]
+            self._known_vehicles[vehicle_id]["altitude"]    = vehicle_data["position"][2]
+            self._known_vehicles[vehicle_id]["destination"] = vehicle_data["destination"]
+            self._known_vehicles[vehicle_id]["last_seen"]   = self.curr_step
 
         vehicle_data = copy(self._known_vehicles[vehicle_id])
         del vehicle_data['last_seen']
@@ -1631,7 +1685,7 @@ class TrackedEdge:
             coors = self.sim.get_vehicle_vals(veh_id, "position")[:2]
             x = self._get_distance_on_road(coors)
             if self.sim.units in ['IMPERIAL']: x *= 0.0006213712
-            veh_data.append((x, speed))
+            veh_data.append((veh_id, x, speed))
 
         self.step_vehicles.append(veh_data)
             
@@ -1736,7 +1790,6 @@ def print_summary(sim_data, save_file=None, tab_width=58):
     _table_print(["Number of Steps:", "{0}".format(sim_duration_steps, start_step, end_step)], tab_width)
     _table_print(["Step Length:", sim_data["step_len"]], tab_width)
     _table_print(["Avg. Step Duration:", str(sim_duration.total_seconds() / sim_duration_steps)+"s"], tab_width)
-    unit_desc = {"METRIC": "Metric (km, km/h)", "UK": "UK (km, mph)", "IMPERIAL": "Imperial (miles, mph)"}
     _table_print(["Units Type:", unit_desc[sim_data["units"]]], tab_width)
     
     print(primary_delineator)
@@ -1745,23 +1798,30 @@ def print_summary(sim_data, save_file=None, tab_width=58):
     _table_print("Vehicle Data", tab_width)
     print(secondary_delineator)
 
-    _table_print(["Avg. No. Vehicles:", round(sum(sim_data["data"]["vehicle"]["no_vehicles"])/len(sim_data["data"]["vehicle"]["no_vehicles"]), 2)], tab_width)
-    _table_print(["Peak No. Vehicles:", int(max(sim_data["data"]["vehicle"]["no_vehicles"]))], tab_width)
-    _table_print(["Final No. Vehicles:", int(sim_data["data"]["vehicle"]["no_vehicles"][-1])], tab_width)
+    _table_print(["Avg. No. Vehicles:", round(sum(sim_data["data"]["vehicles"]["no_vehicles"])/len(sim_data["data"]["vehicles"]["no_vehicles"]), 2)], tab_width)
+    _table_print(["Peak No. Vehicles:", int(max(sim_data["data"]["vehicles"]["no_vehicles"]))], tab_width)
+    _table_print(["Final No. Vehicles:", int(sim_data["data"]["vehicles"]["no_vehicles"][-1])], tab_width)
     _table_print(["Individual Data:", "Yes" if "all_vehicles" in sim_data["data"].keys() else "No"], tab_width)
     print(tertiary_delineator)
-    _table_print(["Total TTS:", "{0}s".format(round(sum(sim_data["data"]["vehicle"]["tts"]), 2))], tab_width)
-    _table_print(["Total Delay:", "{0}s".format(round(sum(sim_data["data"]["vehicle"]["delay"]), 2))], tab_width)
+    _table_print(["Total TTS:", "{0}s".format(round(sum(sim_data["data"]["vehicles"]["tts"]), 2))], tab_width)
+    _table_print(["Total Delay:", "{0}s".format(round(sum(sim_data["data"]["vehicles"]["delay"]), 2))], tab_width)
     _table_print(["Individual Data:", "Yes" if "all_vehicles" in sim_data["data"].keys() else "No"], tab_width)
+
+    print(secondary_delineator)
+    _table_print("Trip Data", tab_width)
+    print(secondary_delineator)
+    n_inc, n_com = len(sim_data["data"]["trips"]["incomplete"]), len(sim_data["data"]["trips"]["complete"])
+    _table_print(["Incomplete Trips:", "{0} ({1}%)".format(n_inc, round(100 * n_inc / (n_inc + n_com), 1))], tab_width)
+    _table_print(["Complete Trips:", "{0} ({1}%)".format(n_com, round(100 * n_com / (n_inc + n_com), 1))], tab_width)
 
     print(secondary_delineator)
     _table_print("Detectors", tab_width)
     print(secondary_delineator)
-    if "detector" not in sim_data["data"].keys() or len(sim_data["data"]["detector"]) == 0:
+    if "detectors" not in sim_data["data"].keys() or len(sim_data["data"]["detectors"]) == 0:
         _table_print("No detectors found.")
     else:
         ils, mees, unknown, labels = [], [], [], ["Induction Loop Detectors", "Multi-Entry-Exit Detectors", "Unknown Type"]
-        for det_id, det_info in sim_data["data"]["detector"].items():
+        for det_id, det_info in sim_data["data"]["detectors"].items():
             if det_info["type"] == "inductionloop": ils.append(det_id)
             elif det_info["type"] == "multientryexit": mees.append(det_id)
             else: unknown.append(det_id)

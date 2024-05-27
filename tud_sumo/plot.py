@@ -6,13 +6,13 @@ from copy import deepcopy
 from simulation import Simulation
 from utils import *
 
-default_labels = {"no_vehicles": "No. of Vehicles", "tts": "Total Time Spent (s)", "delay": "Delay (s)",
+default_labels = {"no_vehicles": "No. of Vehicles", "tts": "Total Time Spent (s)", "delay": "Delay (s)", "throughput": "Throughput (veh/hr)",
                   "veh_counts": "No. of Vehicles", "occupancies": "Occupancy (%)", "densities": "Density unit",
                   "nc": "No Control", "alinea": "ALINEA", "lppo": "Local PPO", "cppo": "Coordinated PPO", "ppo": "Proximal Policy Optimisation (PPO)"}
 
 default_titles = {"no_vehicles": "Number of Vehicles", "tts": "Total Time Spent", "delay": "Delay",
                   "veh_counts": "Number of Vehicles", "occupancies": "Vehicle Occupancies", "densities": "Vehicle Density",
-                  "speeds": "Average Speed", "limits": "Speed Limit"}
+                  "speeds": "Average Speed", "limits": "Speed Limit", "throughput": "Throughput"}
 
 class Plotter:
     def __init__(self, simulation: Simulation|str, sim_label: str|None=None, sim_time_units: str="s", fig_save_loc: str="", overwrite_figs: bool=True) -> None:
@@ -466,10 +466,10 @@ class Plotter:
 
                 all_detector_data = []
                 for det_id in detector_ids:
-                    if "detector" in self.sim_data["data"].keys():
-                        if det_id in self.sim_data["data"]["detector"].keys():
-                            if data_key in self.sim_data["data"]["detector"][det_id].keys():
-                                det_data = self.sim_data["data"]["detector"][det_id][data_key]
+                    if "detectors" in self.sim_data["data"].keys():
+                        if det_id in self.sim_data["data"]["detectors"].keys():
+                            if data_key in self.sim_data["data"]["detectors"][det_id].keys():
+                                det_data = self.sim_data["data"]["detectors"][det_id][data_key]
                                 all_detector_data.append(det_data)
                             else: raise KeyError("Plotter.plot_rm_rate_detector_data(): Unrecognised dataset key '{0}'.".format(data_key))
                         else: raise KeyError("Plotter.plot_rm_rate_detector_data(): Unrecognised detector ID '{0}'.".format(det_id))
@@ -692,12 +692,12 @@ class Plotter:
             self.units = self.simulation.units.name
 
         if data_key not in ["no_vehicles", "tts", "delay"]:
-            raise KeyError("Plotter.plot_vehicle_data(): Unrecognised data key '{0}' (must be [no_vehicles|tts|delay]).".format(data_key))
+            raise KeyError("Plotter.plot_vehicle_data(): Unrecognised data key '{0}' (must be ['no_vehicles'|'tts'|'delay']).".format(data_key))
 
         fig, ax = plt.subplots(1, 1)
         start, step = self.sim_data["start"], self.sim_data["step_len"]
 
-        y_vals = self.sim_data["data"]["vehicle"][data_key]
+        y_vals = self.sim_data["data"]["vehicles"][data_key]
         if plot_cumulative: y_vals = get_cumulative_arr(y_vals)
         x_vals = get_time_steps(y_vals, self.sim_time_units, step, start)
         x_vals, y_vals = limit_vals_by_range(x_vals, y_vals, time_range)
@@ -745,12 +745,12 @@ class Plotter:
 
         if data_key not in ["speeds", "veh_counts", "occupancies"]:
             raise KeyError("Plotter.plot_detector_data(): Unrecognised data key '{0}' (must be [speeds|veh_counts|occupancies]).".format(data_key))
-        elif detector_id not in self.sim_data["data"]["detector"].keys():
+        elif detector_id not in self.sim_data["data"]["detectors"].keys():
             raise KeyError("Plotter.plot_detector_data(): Detector ID '{0}' not found.".format(detector_id))
-        elif data_key == "occupancy" and self.sim_data["data"]["detector"][detector_id]["type"] == "multientryexit":
+        elif data_key == "occupancy" and self.sim_data["data"]["detectors"][detector_id]["type"] == "multientryexit":
             raise ValueError("Plotter.plot_detector_data(): Multi-Entry-Exit Detectors ('{0}') do not measure '{1}'.".format(detector_id, data_key))
         
-        y_vals = self.sim_data["data"]["detector"][detector_id][data_key]
+        y_vals = self.sim_data["data"]["detectors"][detector_id][data_key]
         if plot_cumulative: y_vals = get_cumulative_arr(y_vals)
         x_vals = get_time_steps(y_vals, self.sim_time_units, step, start)
         x_vals, y_vals = limit_vals_by_range(x_vals, y_vals, time_range)
@@ -812,10 +812,10 @@ class Plotter:
             if inflow_detectors == None or outflow_detectors == None:
                 raise TypeError("Plotter.plot_cumulative_curve(): If using detectors, both inflow and outflow detectors are required.")
             
-            if "detector" not in self.sim_data["data"].keys():
+            if "detectors" not in self.sim_data["data"].keys():
                 raise KeyError("Plotter.plot_vehicle_detector_data(): No detector data to plot.")
             
-            detector_data = self.sim_data["data"]["detector"]
+            detector_data = self.sim_data["data"]["detectors"]
             if not hasattr(inflow_detectors, "__iter__"): inflow_detectors = [inflow_detectors]
             if not hasattr(outflow_detectors, "__iter__"): outflow_detectors = [outflow_detectors]
 
@@ -1102,13 +1102,13 @@ class Plotter:
                 if curr_time <= time_range[1] and curr_time >= time_range[0]:
                     for veh_data in step_data:
 
-                        y_val = (veh_data[0] * edge_length) + edge_offset
+                        y_val = (veh_data[1] * edge_length) + edge_offset
                         if not upstream_at_top: y_val = total_len - y_val
                         y_val *= y_scale
 
                         if curr_step not in ordered_points.keys():
-                            ordered_points[curr_step] = [(y_val, veh_data[1])]
-                        else: ordered_points[curr_step].append((y_val, veh_data[1]))
+                            ordered_points[curr_step] = [(y_val, veh_data[2])]
+                        else: ordered_points[curr_step].append((y_val, veh_data[2]))
                         
                 elif curr_time > time_range[1]:
                     break

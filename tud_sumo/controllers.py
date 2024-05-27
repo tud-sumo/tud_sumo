@@ -96,8 +96,8 @@ class RGController:
         self.activated = False
         self.activation_times = []
         
-        self.old_target = None if "old_target" not in rg_params.keys() else rg_params["old_target"]
-        self.target = None if "target" not in rg_params.keys() else rg_params["target"]
+        self.old_target = None if "old_destination" not in rg_params.keys() else rg_params["old_destination"]
+        self.target = None if "new_destination" not in rg_params.keys() else rg_params["new_destination"]
 
         self.g_type = None
 
@@ -204,9 +204,9 @@ class RGController:
             for veh_id in all_vehs:
                 total_vehs += 1
                 if veh_id not in self.diverted_vehs and random() <= self.diversion_pct:
-                    if self.old_target == None or self.sim.get_vehicle_vals("target") == self.old_target:
+                    if self.old_target == None or self.sim.get_vehicle_vals("new_destination") == self.old_target:
                         if self.g_type == 'EDGE':
-                            self.sim.set_vehicle_vals(veh_id, target=self.target, highlight=self.highlight_colour)
+                            self.sim.set_vehicle_vals(veh_id, destination=self.target, highlight=self.highlight_colour)
                         elif self.g_type == 'ROUTE':
                             self.sim.set_vehicle_vals(veh_id, route_id=self.target, highlight=self.highlight_colour)
 
