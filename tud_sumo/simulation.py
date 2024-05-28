@@ -49,7 +49,7 @@ class Simulation:
         self._all_curr_vehicle_ids = set([])
         self._all_loaded_vehicle_ids = set([])
         self._known_vehicles = {}
-        self._trips = {"incomplete": {}, "complete": {}}
+        self._trips = {"incomplete": {}, "completed": {}}
 
     def __str__(self):
         if self.scenario_name != None:
@@ -193,7 +193,7 @@ class Simulation:
         for controller in self.controllers.values():
             controller.reset()
 
-        self._trips = {"incomplete": {}, "complete": {}}
+        self._trips = {"incomplete": {}, "completed": {}}
 
         self._sim_start_time = get_time_str()
         self.all_data = None
@@ -343,7 +343,7 @@ class Simulation:
             if len(self.tracked_edges) > 0: all_data["data"]["edges"] = {}
             if len(self.controllers) > 0: all_data["data"]["controllers"] = {}
             all_data["data"]["vehicles"] = {}
-            all_data["data"]["trips"] = {"incomplete": {}, "complete": {}}
+            all_data["data"]["trips"] = {"incomplete": {}, "completed": {}}
             if self._get_individual_vehicle_data: all_data["data"]["all_vehicles"] = []
             if self._scheduler != None: all_data["data"]["events"] = {}
         else: 
@@ -444,16 +444,16 @@ class Simulation:
         all_vehicles_out = all_prev_vehicle_ids - self._all_curr_vehicle_ids
 
         for veh_id in all_vehicles_in:
-            veh_route = self.get_vehicle_vals(veh_id, "route_edges")
-            origin, destination = veh_route[0], veh_route[-1]
-            self._trips["incomplete"][veh_id] = {"departure": self.curr_step, "origin": origin, "destination": destination}
+            veh_data = self.get_vehicle_vals(veh_id, ("type", "route_edges"))
+            veh_type, origin, destination = veh_data["type"], veh_data["route_edges"][0], veh_data["route_edges"][-1]
+            self._trips["incomplete"][veh_id] = {"vehicle_type": veh_type, "departure": self.curr_step, "origin": origin, "destination": destination}
 
         for veh_id in all_vehicles_out:
             if veh_id in self._trips["incomplete"].keys():
                 trip_data = self._trips["incomplete"][veh_id]
-                departure, origin, destination = trip_data["departure"], trip_data["origin"], trip_data["destination"]
+                veh_type, departure, origin, destination = trip_data["vehicle_type"], trip_data["departure"], trip_data["origin"], trip_data["destination"]
                 del self._trips["incomplete"][veh_id]
-                self._trips["complete"][veh_id] = {"departure": departure, "arrival": self.curr_step, "origin": origin, "destination": destination}
+                self._trips["completed"][veh_id] = {"vehicle_type": veh_type, "departure": departure, "arrival": self.curr_step, "origin": origin, "destination": destination}
             
             else:
                 if veh_id in self._known_vehicles.keys():
@@ -989,12 +989,12 @@ class Simulation:
             match data_key:
                 case "type":
                     new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
-                    if not vehicle_known: self._known_vehicles[vehicle_id][vehicle_id] = {}
+                    if not vehicle_known: self._known_vehicles[vehicle_id] = {}
                     if new_request: self._known_vehicles[vehicle_id][data_key] = traci.vehicle.getTypeID(vehicle_id)
                     data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
                 case "length":
                     new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
-                    if not vehicle_known: self._known_vehicles[vehicle_id][vehicle_id] = {}
+                    if not vehicle_known: self._known_vehicles[vehicle_id] = {}
                     if new_request:
                         length = traci.vehicle.getLength(vehicle_id)
                         if self.units.name == 'IMPERIAL': length *= 3.28084
@@ -1018,7 +1018,7 @@ class Simulation:
                     data_vals[data_key] = traci.vehicle.getAngle(vehicle_id)
                 case "departure":
                     new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
-                    if not vehicle_known: self._known_vehicles[vehicle_id][vehicle_id] = {}
+                    if not vehicle_known: self._known_vehicles[vehicle_id] = {}
                     # Departure should be in steps (not seconds!) to avoid confusion when converting time units
                     if new_request: self._known_vehicles[vehicle_id][data_key] = int(traci.vehicle.getDeparture(vehicle_id) / self.step_length)
                     data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
@@ -1028,7 +1028,7 @@ class Simulation:
                     data_vals[data_key] = list(traci.vehicle.getRoute(vehicle_id))[-1]
                 case "origin":
                     new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
-                    if not vehicle_known: self._known_vehicles[vehicle_id][vehicle_id] = {}
+                    if not vehicle_known: self._known_vehicles[vehicle_id] = {}
                     if new_request: self._known_vehicles[vehicle_id][data_key] = list(traci.vehicle.getRoute(vehicle_id))[0]
                     data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
                 case "route_id":
@@ -1810,9 +1810,9 @@ def print_summary(sim_data, save_file=None, tab_width=58):
     print(secondary_delineator)
     _table_print("Trip Data", tab_width)
     print(secondary_delineator)
-    n_inc, n_com = len(sim_data["data"]["trips"]["incomplete"]), len(sim_data["data"]["trips"]["complete"])
+    n_inc, n_com = len(sim_data["data"]["trips"]["incomplete"]), len(sim_data["data"]["trips"]["completed"])
     _table_print(["Incomplete Trips:", "{0} ({1}%)".format(n_inc, round(100 * n_inc / (n_inc + n_com), 1))], tab_width)
-    _table_print(["Complete Trips:", "{0} ({1}%)".format(n_com, round(100 * n_com / (n_inc + n_com), 1))], tab_width)
+    _table_print(["Completed Trips:", "{0} ({1}%)".format(n_com, round(100 * n_com / (n_inc + n_com), 1))], tab_width)
 
     print(secondary_delineator)
     _table_print("Detectors", tab_width)

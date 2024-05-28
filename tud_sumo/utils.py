@@ -7,6 +7,7 @@ time_format = "%H:%M:%S"
 datetime_format = "%d/%m/%Y, %H:%M:%S"
 
 unit_desc = {"METRIC": "Metric (km, km/h)", "UK": "UK (km, mph)", "IMPERIAL": "Imperial (miles, mph)"}
+time_desc = {"s": "Seconds", "m": "Minutes", "hr": "Hours"}
 
 class Units(Enum):
     METRIC = 1

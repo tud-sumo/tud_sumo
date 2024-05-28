@@ -1,4 +1,5 @@
 import json, math, csv, matplotlib.pyplot as plt, numpy as np
+import matplotlib.patheffects as pe
 import matplotlib
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import os.path
@@ -778,6 +779,131 @@ class Plotter:
 
         self.display_figure(save_fig)
 
+    def plot_od_trip_times(self, od_pairs: list|tuple|None=None, vtypes: list|tuple|None=None, ascending_vals: bool=True, time_unit: str="m", time_range: list|tuple|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+        """
+        Plots average trip times for Origin-Destination pairs.
+        :param od_pairs:       (n x 2) list containing OD pairs. If not given, all OD pairs are plotted
+        :param vtypes:         List of vehicle types for included trips (defaults to all)
+        :param ascending_vals: If true, the largest values are plotted in the bottom-right, if false, top-left
+        :param time_unit:      Time unit for displaying values, must be ['s'|'m'|'hr'], defaults to 'm'
+        :param time_range:     Plotting time range (in plotter class units, separate to time_unit parameter)
+        :param fig_title:      If given, will overwrite default title
+        :param save_fig:       Output image filename, will show image if not given
+        """
+        
+        if time_unit not in ["s", "m", "hr"]:
+            raise ValueError("Invalid time unit '{0}' (must be ['s'|'m'|'hr']).".format(time_unit))
+        
+        if self.simulation != None:
+            self.sim_data = self.simulation.all_data
+            self.units = self.simulation.units.name
+
+        step = self.sim_data["step_len"]
+
+        od_trip_times, add_new = {}, od_pairs == None
+        all_origins, all_destinations = set([]), set([])
+        if od_pairs != None:
+            for pair in od_pairs:
+                od_trip_times[pair[0]] = {pair[1]: []}
+                all_origins.add(pair[0])
+                all_destinations.add(pair[1])
+
+        n_trips = 0
+        com_trip_data = self.sim_data["data"]["trips"]["completed"]
+        for trip in com_trip_data.values():
+            origin, destination = trip["origin"], trip["destination"]
+            veh_type = trip["vehicle_type"]
+
+            if vtypes != None and veh_type not in veh_type: continue
+            
+            if origin not in od_trip_times.keys():
+                if add_new:
+                    od_trip_times[origin] = {}
+                else: continue
+            
+            if destination not in od_trip_times[origin].keys():
+                if add_new: od_trip_times[origin][destination] = []
+                else: continue
+
+            trip_time = convert_time_units(trip["arrival"] - trip["departure"], time_unit, step)
+            trip_departure, trip_arrival = convert_time_units([trip["departure"], trip["arrival"]], self.sim_time_units, step)
+
+            if time_range != None and trip_departure < time_range[0] and trip_arrival > time_range[1]:
+                continue
+
+            od_trip_times[origin][destination].append(trip_time)
+            all_origins.add(origin)
+            all_destinations.add(destination)
+            n_trips += 1
+        
+        if n_trips == 0:
+            raise ValueError("No trips found.")
+
+        all_origins = list(all_origins)
+        all_destinations = list(all_destinations)
+
+        if add_new:
+            avg_o_tts = []
+            for o in all_origins:
+                o_tts = [sum(d)/len(d) for d in od_trip_times[o].values()]
+                avg_o_tts.append(sum(o_tts)/len(o_tts))
+            
+            all_origins = [x for _, x in sorted(zip(avg_o_tts, all_origins))]
+            
+            avg_d_tts = []
+            for d in all_destinations:
+                d_tts = []
+                for o_data in od_trip_times.values():
+                    if d in o_data.keys():
+                        d_tts.append(sum(o_data[d])/len(o_data[d]))
+                avg_d_tts.append(sum(d_tts)/len(d_tts))
+
+            all_destinations = [x for _, x in sorted(zip(avg_d_tts, all_destinations))]
+
+        att_matrix = np.empty((len(all_origins), len(all_destinations)))
+        att_matrix[:] = np.nan
+        
+        if add_new and not ascending_vals:
+            all_origins.reverse()
+            all_destinations.reverse()
+
+        for i, origin in enumerate(all_origins):
+            for j, destination in enumerate(all_destinations):
+                if destination in od_trip_times[origin].keys():
+                    trip_times = od_trip_times[origin][destination]
+                    att_matrix[i][j] = sum(trip_times) / len(trip_times)
+
+        fig, ax = plt.subplots(1, 1, figsize=(6, 6))
+        masked_array = np.ma.array(att_matrix, mask=np.isnan(att_matrix))
+        cmap = matplotlib.cm.Reds
+        cmap.set_bad('#f7f7f7')
+        ax.matshow(masked_array, interpolation='nearest', cmap=cmap)
+
+        ax.set_xticks(np.arange(len(all_destinations)), labels=all_destinations)
+        ax.set_yticks(np.arange(len(all_origins)), labels=all_origins)
+        ax.xaxis.set_ticks_position("bottom")
+        ax.xaxis.set_label_position("top")
+        ax.yaxis.set_label_position("right")
+
+        for row in range(att_matrix.shape[0]):
+            for col in range(att_matrix.shape[1]):
+                if not np.isnan(att_matrix[row, col]):
+                    ax.text(x=col, y=row, s=round(att_matrix[row, col], 2) if time_unit != "s" else int(att_matrix[row, col]),
+                            va='center', ha='center', color='white', path_effects=[pe.withStroke(linewidth=2, foreground="black")]) 
+
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
+
+        ax.set_xlabel("Destination ID")
+        ax.set_ylabel("Origin ID")
+        
+        if fig_title == None:
+            fig_title = self.sim_label + "Average Trip Times in {0}".format(time_desc[time_unit])
+        ax.set_title(fig_title, pad=30, fontweight='bold')
+
+        fig.tight_layout()
+
+        self.display_figure(save_fig)
+
     def plot_cumulative_curve(self, inflow_detectors: list|tuple|None=None, outflow_detectors: list|tuple|None=None, outflow_offset: int|float=0, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot inflow and outflow cumulative curves, either system-wide or using inflow/outflow detectors (if given).
@@ -794,20 +920,20 @@ class Plotter:
             self.units = self.simulation.units.name
 
         inflows, outflows = [], []
+        start, end, step = self.sim_data["start"], self.sim_data["end"], self.sim_data["step_len"]
 
         if inflow_detectors == None and outflow_detectors == None:
 
-            if "all_vehicles" not in self.sim_data["data"].keys():
-                raise KeyError("Plotter.plot_cumulative_curve(): Plot requires 'individual_vehicle_data=True' during the simulation to plot system cumulative curves.")
-            else: all_vehicle_data = self.sim_data["data"]["all_vehicles"]
+            inflows, outflows = [0] * (end - start), [0] * (end - start)
+
+            trips = self.sim_data["data"]["trips"]
+            for inc_trip in trips["incomplete"].values():
+                inflows[inc_trip["departure"]] += 1
             
-            prev_vehicles = set([])
-            
-            for step, vehicles in enumerate(all_vehicle_data):
-                curr_vehicles = set(vehicles.keys())
-                inflows.append(len(curr_vehicles - prev_vehicles))
-                outflows.append(len(prev_vehicles - curr_vehicles))
-                prev_vehicles = curr_vehicles
+            for com_trip in trips["completed"].values():
+                inflows[com_trip["departure"]] += 1
+                outflows[com_trip["arrival"]] += 1
+
         else:
             if inflow_detectors == None or outflow_detectors == None:
                 raise TypeError("Plotter.plot_cumulative_curve(): If using detectors, both inflow and outflow detectors are required.")
@@ -839,7 +965,6 @@ class Plotter:
 
         inflows = get_cumulative_arr(inflows)
         outflows = get_cumulative_arr(outflows)
-        start, end, step = self.sim_data["start"], self.sim_data["end"], self.sim_data["step_len"]
         x_vals = get_time_steps(inflows, self.sim_time_units, step, start)
 
         fig, ax = plt.subplots(1, 1)
