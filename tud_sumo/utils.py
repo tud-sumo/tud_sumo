@@ -1,6 +1,7 @@
 import json, os, math, inspect, numpy as np
 from enum import Enum
 from datetime import datetime
+import traci.constants as tc
 
 date_format = "%d/%m/%Y"
 time_format = "%H:%M:%S"
@@ -8,6 +9,18 @@ datetime_format = "%d/%m/%Y, %H:%M:%S"
 
 unit_desc = {"METRIC": "Metric (km, km/h)", "UK": "UK (km, mph)", "IMPERIAL": "Imperial (miles, mph)"}
 time_desc = {"s": "Seconds", "m": "Minutes", "hr": "Hours"}
+
+traci_constants = {"vehicle": {
+                                "speed": tc.VAR_SPEED, "is_stopped": tc.VAR_SPEED, "max_speed": tc.VAR_MAXSPEED, "acceleration": tc.VAR_ACCELERATION,
+                                "position": tc.VAR_POSITION, "altitude": tc.VAR_POSITION3D, "heading": tc.VAR_ANGLE, "lane_idx": tc.VAR_LANE_INDEX,
+                                "destination": tc.VAR_ROUTE, "route_id": tc.VAR_ROUTE_ID, "route_idx": tc.VAR_ROUTE_INDEX, "route_edges": tc.VAR_ROUTE},
+                   "detector": {
+                                "vehicle_count": tc.LAST_STEP_VEHICLE_NUMBER, "vehicle_ids": tc.LAST_STEP_VEHICLE_ID_LIST, "speed": tc.LAST_STEP_MEAN_SPEED,
+                                "halting_no": tc.LAST_STEP_VEHICLE_HALTING_NUMBER, "occupancy": tc.LAST_STEP_OCCUPANCY, "last_detection": tc.LAST_STEP_TIME_SINCE_DETECTION},
+                   "geometry": {
+                                "vehicle_count": tc.LAST_STEP_VEHICLE_NUMBER, "vehicle_ids": tc.LAST_STEP_VEHICLE_ID_LIST, "speed": tc.LAST_STEP_MEAN_SPEED,
+                                "halting_no": tc.LAST_STEP_VEHICLE_HALTING_NUMBER, "occupancy": tc.LAST_STEP_OCCUPANCY}
+                  }
 
 class Units(Enum):
     METRIC = 1

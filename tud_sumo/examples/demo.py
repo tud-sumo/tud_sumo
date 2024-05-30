@@ -31,7 +31,7 @@ if __name__ == "__main__":
     # redirection point and a target edge/route ID to redirect drivers to. Can also define a diversion
     # percent to randomly divert only a percent of drivers, and a highlight colour for the SUMO gui, which
     # will highlight affected drivers.
-    my_sim.add_controllers({"rerouter": {"type": "RG", "detector_ids": ["rerouter_2"], "new_destination": "urban_out", "diversion_pct": 0.25, "highlight": "00FF00"}})
+    my_sim.add_controllers({"rerouter": {"type": "RG", "detector_ids": ["rerouter_2"], "new_destination": "urban_out_w", "diversion_pct": 0.25, "highlight": "00FF00"}})
 
     # Add tracked edges. This will track some basic information, such as average speed etc, but can also
     # be used to create space-time diagrams as individual vehicle speeds and positions are tracked.
@@ -49,6 +49,11 @@ if __name__ == "__main__":
         
         # Step through n steps.
         my_sim.step_through(n, pbar=pbar)
+
+        # Add a new vehicle
+        if my_sim.curr_step % n == 0:
+            my_sim.add_vehicle("lorry_"+str(randint(0, 100)), "lorries", ("urban_in_e", "urban_out_w"), origin_lane="first")
+            my_sim.add_vehicle("car_"+str(randint(0, 100)), "cars", ("urban_in_w", "urban_out_e"))
 
         if my_sim.curr_step == 250:
             # Activate RG controller & update UTSC phases.

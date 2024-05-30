@@ -5,31 +5,32 @@
  |    Example traffic controllers, with a ramp meter, VSL     | 
  |               controller and route guidance.               | 
  *============================================================*
- |                 Simulation Run: 28/05/2024                 | 
- |               13:44:33 - 13:44:51 (0:00:18)                | 
+ |                 Simulation Run: 30/05/2024                 | 
+ |               16:26:21 - 16:26:31 (0:00:10)                | 
  *------------------------------------------------------------*
  | Number of Steps:                                       500 | 
  | Step Length:                                           1.0 | 
- | Avg. Step Duration:                                 0.036s | 
+ | Avg. Step Duration:                                  0.02s | 
  | Units Type:                              Metric (km, km/h) | 
+ | Seed:                                               random | 
  *============================================================*
  |                            Data                            | 
  *============================================================*
  |                        Vehicle Data                        | 
  *------------------------------------------------------------*
- | Avg. No. Vehicles:                                  755.57 | 
- | Peak No. Vehicles:                                    1274 | 
- | Final No. Vehicles:                                   1274 | 
+ | Avg. No. Vehicles:                                  764.63 | 
+ | Peak No. Vehicles:                                    1290 | 
+ | Final No. Vehicles:                                   1289 | 
  | Individual Data:                                        No | 
  * ---------------------------------------------------------- *
- | Total TTS:                                       377787.0s | 
- | Total Delay:                                      14578.0s | 
+ | Total TTS:                                       382314.0s | 
+ | Total Delay:                                      28600.0s | 
  | Individual Data:                                        No | 
  *------------------------------------------------------------*
  |                         Trip Data                          | 
  *------------------------------------------------------------*
- | Incomplete Trips:                             1274 (67.6%) | 
- | Completed Trips:                               611 (32.4%) | 
+ | Incomplete Trips:                             1289 (68.2%) | 
+ | Completed Trips:                               600 (31.8%) | 
  *------------------------------------------------------------*
  |                         Detectors                          | 
  *------------------------------------------------------------*

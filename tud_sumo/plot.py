@@ -8,11 +8,11 @@ from simulation import Simulation
 from utils import *
 
 default_labels = {"no_vehicles": "No. of Vehicles", "tts": "Total Time Spent (s)", "delay": "Delay (s)", "throughput": "Throughput (veh/hr)",
-                  "veh_counts": "No. of Vehicles", "occupancies": "Occupancy (%)", "densities": "Density unit",
+                  "vehicle_counts": "No. of Vehicles", "occupancies": "Occupancy (%)", "densities": "Density unit",
                   "nc": "No Control", "alinea": "ALINEA", "lppo": "Local PPO", "cppo": "Coordinated PPO", "ppo": "Proximal Policy Optimisation (PPO)"}
 
 default_titles = {"no_vehicles": "Number of Vehicles", "tts": "Total Time Spent", "delay": "Delay",
-                  "veh_counts": "Number of Vehicles", "occupancies": "Vehicle Occupancies", "densities": "Vehicle Density",
+                  "vehicle_counts": "Number of Vehicles", "occupancies": "Vehicle Occupancies", "densities": "Vehicle Density",
                   "speeds": "Average Speed", "limits": "Speed Limit", "throughput": "Throughput"}
 
 class Plotter:
@@ -416,7 +416,7 @@ class Plotter:
         Plot ramp metering rate next to detector data.
         :param rm_ids:         Ramp meter junction ID or list of IDs
         :param detector_ids:   List of detector IDs or nested list for multiple meters
-        :param data_keys:      Plotting data keys ["speeds", "veh_counts", "occupancies"]
+        :param data_keys:      Plotting data keys ["speeds", "vehicle_counts", "occupancies"]
         :param time_range:     Plotting time range (in plotter class units)
         :param aggregate_data: Averaging interval in steps (defaults to 10)
         :param data_titles:    List of axes titles, if given must have same length as data_keys
@@ -729,7 +729,7 @@ class Plotter:
         """
         Plot detector data.
         :param detector_id:     Detector ID
-        :param data_key:        Data key to plot, either "speeds", "veh_counts" or "occupancies"
+        :param data_key:        Data key to plot, either "speeds", "vehicle_counts" or "occupancies"
         :param plot_cumulative: Bool denoting whether to plot cumulative values
         :param time_range:      Plotting time range (in plotter class units)
         :param show_events:     Bool denoting whether to plot when events occur
@@ -744,8 +744,8 @@ class Plotter:
         fig, ax = plt.subplots(1, 1)
         start, step = self.sim_data["start"], self.sim_data["step_len"]
 
-        if data_key not in ["speeds", "veh_counts", "occupancies"]:
-            raise KeyError("Plotter.plot_detector_data(): Unrecognised data key '{0}' (must be [speeds|veh_counts|occupancies]).".format(data_key))
+        if data_key not in ["speeds", "vehicle_counts", "occupancies"]:
+            raise KeyError("Plotter.plot_detector_data(): Unrecognised data key '{0}' (must be [speeds|vehicle_counts|occupancies]).".format(data_key))
         elif detector_id not in self.sim_data["data"]["detectors"].keys():
             raise KeyError("Plotter.plot_detector_data(): Detector ID '{0}' not found.".format(detector_id))
         elif data_key == "occupancy" and self.sim_data["data"]["detectors"][detector_id]["type"] == "multientryexit":
@@ -952,8 +952,8 @@ class Plotter:
             for step_no in range(self.sim_data["end"] - self.sim_data["start"]):
                 vehs_in, vehs_out = set([]), set([])
 
-                for detector_id in inflow_detectors: vehs_in = vehs_in | set(detector_data[detector_id]["veh_ids"][step_no])
-                for detector_id in outflow_detectors: vehs_out = vehs_out | set(detector_data[detector_id]["veh_ids"][step_no])
+                for detector_id in inflow_detectors: vehs_in = vehs_in | set(detector_data[detector_id]["vehicle_ids"][step_no])
+                for detector_id in outflow_detectors: vehs_out = vehs_out | set(detector_data[detector_id]["vehicle_ids"][step_no])
 
                 inflows.append(len(vehs_in - prev_in_vehicles))
                 if step_no > outflow_offset / self.sim_data["step_len"]:
