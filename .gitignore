@@ -7,3 +7,4 @@ tud_sumo/ramp_metering/rm.py
 Wiki/*
 tud_sumo/rm_plot.py
 tud_sumo/examples/create_scenarios.py
+*.xml
