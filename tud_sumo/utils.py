@@ -13,12 +13,12 @@ time_desc = {"s": "Seconds", "m": "Minutes", "hr": "Hours"}
 traci_constants = {"vehicle": {
                                 "speed": tc.VAR_SPEED, "is_stopped": tc.VAR_SPEED, "max_speed": tc.VAR_MAXSPEED, "acceleration": tc.VAR_ACCELERATION,
                                 "position": tc.VAR_POSITION, "altitude": tc.VAR_POSITION3D, "heading": tc.VAR_ANGLE, "lane_idx": tc.VAR_LANE_INDEX,
-                                "destination": tc.VAR_ROUTE, "route_id": tc.VAR_ROUTE_ID, "route_idx": tc.VAR_ROUTE_INDEX, "route_edges": tc.VAR_ROUTE},
+                                "route_id": tc.VAR_ROUTE_ID, "route_idx": tc.VAR_ROUTE_INDEX, "route_edges": tc.VAR_ROUTE},
                    "detector": {
                                 "vehicle_count": tc.LAST_STEP_VEHICLE_NUMBER, "vehicle_ids": tc.LAST_STEP_VEHICLE_ID_LIST, "speed": tc.LAST_STEP_MEAN_SPEED,
                                 "halting_no": tc.LAST_STEP_VEHICLE_HALTING_NUMBER, "occupancy": tc.LAST_STEP_OCCUPANCY, "last_detection": tc.LAST_STEP_TIME_SINCE_DETECTION},
                    "geometry": {
-                                "vehicle_count": tc.LAST_STEP_VEHICLE_NUMBER, "vehicle_ids": tc.LAST_STEP_VEHICLE_ID_LIST, "speed": tc.LAST_STEP_MEAN_SPEED,
+                                "vehicle_count": tc.LAST_STEP_VEHICLE_NUMBER, "vehicle_ids": tc.LAST_STEP_VEHICLE_ID_LIST, "vehicle_speed": tc.LAST_STEP_MEAN_SPEED,
                                 "halting_no": tc.LAST_STEP_VEHICLE_HALTING_NUMBER, "occupancy": tc.LAST_STEP_OCCUPANCY}
                   }
 
@@ -37,14 +37,6 @@ def raise_error(error, desc, curr_sim_step=None):
     error_msg = "{0}: {1}".format(caller, desc)
     if curr_sim_step != None: error_msg = "(step {0}) ".format(curr_sim_step) + error_msg
     raise error(error_msg)
-    try:
-        caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
-        error_msg = "{0}: {1}".format(caller, desc)
-        if curr_sim_step != None: error_msg = "(step {0}) ".format(curr_sim_step) + error_msg
-        raise error(error_msg)
-    except Exception:
-        print("tud_sumo: An unknown error occurred.")
-        raise KeyError("no")
 
 def raise_warning(desc, curr_sim_step=None):
     caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
@@ -52,7 +44,7 @@ def raise_warning(desc, curr_sim_step=None):
     if curr_sim_step != None: warning_msg = "(step {0}) ".format(curr_sim_step) + warning_msg
     print(warning_msg)
 
-def convert_time_units(time_vals, unit, step_len):
+def convert_time_units(time_vals, unit, step_len, keep_arr=False):
     if not isinstance(time_vals, list): time_vals = [time_vals]
     if unit == "s" and step_len != None:
         time_vals = [val * step_len for val in time_vals]
@@ -61,7 +53,7 @@ def convert_time_units(time_vals, unit, step_len):
     elif unit == "hr" and step_len != None:
         time_vals = [(val * step_len)/3600 for val in time_vals]
 
-    if len(time_vals) == 1: return time_vals[0]
+    if len(time_vals) == 1 and not keep_arr: return time_vals[0]
     else: return time_vals
 
 def get_time_steps(data_vals, unit, step_len=None, start=0):

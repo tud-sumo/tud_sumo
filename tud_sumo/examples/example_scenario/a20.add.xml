@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2024-06-05 14:22:09 by Eclipse SUMO netedit Version v1_15_0+3072-a493b9138de
+-->
+
+<additional xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/additional_file.xsd">
+    <!-- Detectors -->
+    <inductionLoop id="a13_ramp_inflow" lane="29281962_0" pos="40.12" period="300.00" file="e1_0.xml"/>
+    <inductionLoop id="cw_down_occ_0" lane="1191885785_0" pos="10.55" period="300.00" file="cw_down_occ_0.xml"/>
+    <inductionLoop id="cw_down_occ_1" lane="1191885785_1" pos="10.82" period="300.00" file="cw_down_occ_1.xml"/>
+    <inductionLoop id="cw_down_occ_2" lane="1191885785_2" pos="10.88" period="300.00" file="cw_down_occ_2.xml"/>
+    <inductionLoop id="cw_down_occ_3" lane="1191885785_3" pos="10.99" period="300.00" file="cw_down_occ_3.xml"/>
+    <inductionLoop id="cw_up_occ_0" lane="126730044_0" pos="133.91" period="300.00" file="cw_up_occ_0.xml"/>
+    <inductionLoop id="cw_up_occ_1" lane="126730044_1" pos="133.98" period="300.00" file="cw_up_occ_1.xml"/>
+    <inductionLoop id="cw_up_occ_2" lane="126730044_2" pos="134.11" period="300.00" file="cw_up_occ_2.xml"/>
+    <inductionLoop id="rerouter_2" lane="629633083_2" pos="784.44" period="300.00" file="rerouter_2.xml"/>
+    <inductionLoop id="utsc_e_in" lane="urban_in_e_0" pos="47.95" period="300.00" file="e1_2.xml"/>
+    <inductionLoop id="utsc_e_out" lane="urban_out_e_0" pos="15.58" period="300.00" file="e1_3.xml"/>
+    <inductionLoop id="utsc_n_in_1" lane="reroute_test_1" pos="45.37" period="300.00" file="e1_5.xml"/>
+    <inductionLoop id="utsc_n_in_2" lane="reroute_test_0" pos="45.68" period="300.00" file="e1_4.xml"/>
+    <inductionLoop id="utsc_w_in" lane="urban_in_w_0" pos="44.35" period="300.00" file="e1_1.xml"/>
+    <inductionLoop id="utsc_w_out" lane="urban_out_w_0" pos="11.30" period="300.00" file="e1_0.xml"/>
+    <entryExitDetector id="a13_ramp_queue" pos="4266.34,1268.04" period="300.00" file="a13_ramp_queue.xml">
+        <detEntry lane="a13_in_0" pos="21.38"/>
+        <detExit lane="a13_in_0" pos="278.50"/>
+    </entryExitDetector>
+    <entryExitDetector id="a13_rm_downstream" pos="3817.63,948.32" period="300.00" file="e3_0.xml">
+        <detEntry lane="1191885772_0" pos="41.32"/>
+        <detEntry lane="1191885772_1" pos="41.19"/>
+        <detEntry lane="1191885772_2" pos="41.11"/>
+        <detExit lane="948542172_0" pos="25.44"/>
+        <detExit lane="948542172_1" pos="25.41"/>
+        <detExit lane="948542172_2" pos="25.51"/>
+    </entryExitDetector>
+    <entryExitDetector id="a13_rm_upstream" pos="4300.76,1212.35" period="300.00" file="a13_rm_upstream.xml">
+        <detEntry lane="29324581_0" pos="924.48"/>
+        <detEntry lane="29324581_1" pos="924.40"/>
+        <detExit lane="29324581_0" pos="966.84"/>
+        <detExit lane="29324581_1" pos="966.57"/>
+    </entryExitDetector>
+    <entryExitDetector id="cw_ramp_inflow" pos="7315.48,2569.88" period="300.00" file="e3_0.xml">
+        <detEntry lane="153667102_0" pos="42.35"/>
+        <detExit lane="153667102_0" pos="67.59"/>
+    </entryExitDetector>
+    <entryExitDetector id="cw_ramp_queue" pos="7531.97,2626.26" period="300.00" file="ramp_queue.xml">
+        <detExit lane="126730201_0" pos="182.68"/>
+        <detExit lane="126730201_1" pos="182.50"/>
+        <detEntry lane="crooswijk_in_1" pos="11.56"/>
+        <detEntry lane="crooswijk_in_0" pos="11.92"/>
+    </entryExitDetector>
+    <entryExitDetector id="cw_rm_downstream" pos="6952.43,2484.25" period="300.00" file="e3_0.xml">
+        <detEntry lane="699077562_0" pos="1.04"/>
+        <detEntry lane="699077562_1" pos="0.43"/>
+        <detEntry lane="699077562_2" pos="0.56"/>
+        <detExit lane="699077562_0" pos="61.97"/>
+        <detExit lane="699077562_1" pos="61.97"/>
+        <detExit lane="699077562_2" pos="61.95"/>
+    </entryExitDetector>
+    <entryExitDetector id="cw_rm_upstream" pos="7668.10,2616.43" period="300.00" file="cw_rm_upstream.xml">
+        <detEntry lane="126730044_0" pos="115.58"/>
+        <detEntry lane="126730044_1" pos="115.83"/>
+        <detEntry lane="126730044_2" pos="115.69"/>
+        <detExit lane="126730044_0" pos="159.70"/>
+        <detExit lane="126730044_1" pos="159.91"/>
+        <detExit lane="126730044_2" pos="160.06"/>
+    </entryExitDetector>
+</additional>

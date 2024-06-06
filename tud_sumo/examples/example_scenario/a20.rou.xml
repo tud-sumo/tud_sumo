@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2024-06-05 14:22:08 by Eclipse SUMO netedit Version v1_15_0+3072-a493b9138de
+-->
+
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+    <!-- VTypes -->
+    <vType id="cars" guiShape="passenger" color="red" lcCooperative="0.6"/>
+    <vType id="lorries" vClass="trailer" guiShape="truck/semitrailer" color="blue" lcCooperative="0.6"/>
+    <vType id="motorcycles" vClass="motorcycle" guiShape="motorcycle" color="yellow" lcCooperative="0.6"/>
+    <vType id="vans" vClass="delivery" guiShape="delivery" color="orange" lcCooperative="0.6"/>
+    <!-- Vehicles, persons and containers (sorted by depart) -->
+    <flow id="base_1" type="cars" begin="0.00" departLane="best" departSpeed="max" from="mainline_in" to="mainline_out" end="10000.00" number="21000"/>
+    <flow id="base_10" type="vans" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="centrum_out" end="10000.00" number="540"/>
+    <flow id="base_11" type="lorries" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="centrum_out" end="10000.00" number="150"/>
+    <flow id="base_12" type="motorcycles" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="centrum_out" end="10000.00" number="30"/>
+    <flow id="base_13" type="cars" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="a13_out" end="10000.00" number="2250"/>
+    <flow id="base_14" type="vans" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="a13_out" end="10000.00" number="540"/>
+    <flow id="base_15" type="lorries" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="a13_out" end="10000.00" number="150"/>
+    <flow id="base_16" type="motorcycles" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="a13_out" end="10000.00" number="30"/>
+    <flow id="base_17" type="cars" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="spaanse_polder_out" end="10000.00" number="2250"/>
+    <flow id="base_18" type="vans" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="spaanse_polder_out" end="10000.00" number="540"/>
+    <flow id="base_19" type="lorries" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="spaanse_polder_out" end="10000.00" number="150"/>
+    <flow id="base_2" type="vans" begin="0.00" departLane="best" departSpeed="max" from="mainline_in" to="mainline_out" end="10000.00" number="5040"/>
+    <flow id="base_20" type="motorcycles" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="spaanse_polder_out" end="10000.00" number="30"/>
+    <flow id="base_21" type="cars" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="schiedam_out" end="10000.00" number="2250"/>
+    <flow id="base_22" type="vans" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="schiedam_out" end="10000.00" number="540"/>
+    <flow id="base_23" type="lorries" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="schiedam_out" end="10000.00" number="150"/>
+    <flow id="base_24" type="motorcycles" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="schiedam_out" end="10000.00" number="30"/>
+    <flow id="base_25" type="cars" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="mainline_out" end="10000.00" number="3750"/>
+    <flow id="base_26" type="vans" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="mainline_out" end="10000.00" number="900"/>
+    <flow id="base_27" type="lorries" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="mainline_out" end="10000.00" number="250"/>
+    <flow id="base_28" type="motorcycles" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="mainline_out" end="10000.00" number="50"/>
+    <flow id="base_29" type="cars" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="a13_out" end="10000.00" number="1500"/>
+    <flow id="base_3" type="lorries" begin="0.00" departLane="best" departSpeed="max" from="mainline_in" to="mainline_out" end="10000.00" number="1400"/>
+    <flow id="base_30" type="vans" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="a13_out" end="10000.00" number="360"/>
+    <flow id="base_31" type="lorries" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="a13_out" end="10000.00" number="100"/>
+    <flow id="base_32" type="motorcycles" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="a13_out" end="10000.00" number="20"/>
+    <flow id="base_33" type="cars" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="spaanse_polder_out" end="10000.00" number="1500"/>
+    <flow id="base_34" type="vans" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="spaanse_polder_out" end="10000.00" number="360"/>
+    <flow id="base_35" type="lorries" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="spaanse_polder_out" end="10000.00" number="100"/>
+    <flow id="base_36" type="motorcycles" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="spaanse_polder_out" end="10000.00" number="20"/>
+    <flow id="base_37" type="cars" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="schiedam_out" end="10000.00" number="1500"/>
+    <flow id="base_38" type="vans" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="schiedam_out" end="10000.00" number="360"/>
+    <flow id="base_39" type="lorries" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="schiedam_out" end="10000.00" number="100"/>
+    <flow id="base_4" type="motorcycles" begin="0.00" departLane="best" departSpeed="max" from="mainline_in" to="mainline_out" end="10000.00" number="280"/>
+    <flow id="base_40" type="motorcycles" begin="0.00" departLane="best" departSpeed="max" from="centrum_in" to="schiedam_out" end="10000.00" number="20"/>
+    <flow id="base_41" type="cars" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="mainline_out" end="10000.00" number="3750"/>
+    <flow id="base_42" type="vans" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="mainline_out" end="10000.00" number="900"/>
+    <flow id="base_43" type="lorries" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="mainline_out" end="10000.00" number="250"/>
+    <flow id="base_44" type="motorcycles" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="mainline_out" end="10000.00" number="50"/>
+    <flow id="base_45" type="cars" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="spaanse_polder_out" end="10000.00" number="1500"/>
+    <flow id="base_46" type="vans" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="spaanse_polder_out" end="10000.00" number="360"/>
+    <flow id="base_47" type="lorries" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="spaanse_polder_out" end="10000.00" number="100"/>
+    <flow id="base_48" type="motorcycles" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="spaanse_polder_out" end="10000.00" number="20"/>
+    <flow id="base_49" type="cars" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="schiedam_out" end="10000.00" number="1500"/>
+    <flow id="base_5" type="cars" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="mainline_out" end="10000.00" number="7500"/>
+    <flow id="base_50" type="vans" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="schiedam_out" end="10000.00" number="360"/>
+    <flow id="base_51" type="lorries" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="schiedam_out" end="10000.00" number="100"/>
+    <flow id="base_52" type="motorcycles" begin="0.00" departLane="best" departSpeed="max" from="a13_in" to="schiedam_out" end="10000.00" number="20"/>
+    <flow id="base_53" type="cars" begin="0.00" departLane="best" departSpeed="max" from="spaanse_polder_in" to="mainline_out" end="10000.00" number="3750"/>
+    <flow id="base_54" type="vans" begin="0.00" departLane="best" departSpeed="max" from="spaanse_polder_in" to="mainline_out" end="10000.00" number="900"/>
+    <flow id="base_55" type="lorries" begin="0.00" departLane="best" departSpeed="max" from="spaanse_polder_in" to="mainline_out" end="10000.00" number="250"/>
+    <flow id="base_56" type="motorcycles" begin="0.00" departLane="best" departSpeed="max" from="spaanse_polder_in" to="mainline_out" end="10000.00" number="50"/>
+    <flow id="base_57" type="cars" begin="0.00" departLane="best" departSpeed="max" from="spaanse_polder_in" to="schiedam_out" end="10000.00" number="1500"/>
+    <flow id="base_58" type="vans" begin="0.00" departLane="best" departSpeed="max" from="spaanse_polder_in" to="schiedam_out" end="10000.00" number="360"/>
+    <flow id="base_59" type="lorries" begin="0.00" departLane="best" departSpeed="max" from="spaanse_polder_in" to="schiedam_out" end="10000.00" number="100"/>
+    <flow id="base_6" type="vans" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="mainline_out" end="10000.00" number="1800"/>
+    <flow id="base_60" type="motorcycles" begin="0.00" departLane="best" departSpeed="max" from="spaanse_polder_in" to="schiedam_out" end="10000.00" number="20"/>
+    <flow id="base_61" type="cars" begin="0.00" departLane="best" departSpeed="max" from="schiedam_in" to="mainline_out" end="10000.00" number="3750"/>
+    <flow id="base_62" type="vans" begin="0.00" departLane="best" departSpeed="max" from="schiedam_in" to="mainline_out" end="10000.00" number="900"/>
+    <flow id="base_63" type="lorries" begin="0.00" departLane="best" departSpeed="max" from="schiedam_in" to="mainline_out" end="10000.00" number="250"/>
+    <flow id="base_64" type="motorcycles" begin="0.00" departLane="best" departSpeed="max" from="schiedam_in" to="mainline_out" end="10000.00" number="50"/>
+    <flow id="base_7" type="lorries" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="mainline_out" end="10000.00" number="500"/>
+    <flow id="base_8" type="motorcycles" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="mainline_out" end="10000.00" number="100"/>
+    <flow id="base_9" type="cars" begin="0.00" departLane="random" departSpeed="max" from="crooswijk_in" to="centrum_out" end="10000.00" number="2250"/>
+</routes>

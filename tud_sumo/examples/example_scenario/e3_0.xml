@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2024-06-06 16:36:01 by Eclipse SUMO sumo Version v1_15_0+3072-a493b9138de
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+
+    <input>
+        <net-file value="example_scenario/a20.net.xml"/>
+        <route-files value="example_scenario/a20.rou.xml"/>
+        <additional-files value="example_scenario/a20.add.xml"/>
+    </input>
+
+    <time>
+        <step-length value="1.0"/>
+    </time>
+
+    <traci_server>
+        <remote-port value="51594"/>
+    </traci_server>
+
+    <random_number>
+        <seed value="1"/>
+    </random_number>
+
+</configuration>
+-->
+
+<e3Detector xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/det_e3_file.xsd">
+   <interval begin="0.00" end="300.00" id="a13_rm_downstream" meanTravelTime="4.51" meanOverlapTravelTime="4.93" meanSpeed="16.79" meanHaltsPerVehicle="0.13" meanTimeLoss="2.22" vehicleSum="132" meanSpeedWithin="6.80" meanHaltsPerVehicleWithin="0.00" meanDurationWithin="5.51" vehicleSumWithin="4" meanIntervalSpeedWithin="6.80" meanIntervalHaltsPerVehicleWithin="0.00" meanIntervalDurationWithin="5.51" meanTimeLossWithin="2.49"/>
+   <interval begin="0.00" end="300.00" id="cw_ramp_inflow" meanTravelTime="1.03" meanOverlapTravelTime="1.28" meanSpeed="26.54" meanHaltsPerVehicle="0.00" meanTimeLoss="0.35" vehicleSum="77" meanSpeedWithin="18.47" meanHaltsPerVehicleWithin="0.00" meanDurationWithin="2.39" vehicleSumWithin="1" meanIntervalSpeedWithin="18.47" meanIntervalHaltsPerVehicleWithin="0.00" meanIntervalDurationWithin="2.39" meanTimeLossWithin="0.56"/>
+   <interval begin="0.00" end="300.00" id="cw_rm_downstream" meanTravelTime="3.35" meanOverlapTravelTime="3.68" meanSpeed="18.40" meanHaltsPerVehicle="0.00" meanTimeLoss="0.63" vehicleSum="287" meanSpeedWithin="17.71" meanHaltsPerVehicleWithin="0.00" meanDurationWithin="2.77" vehicleSumWithin="5" meanIntervalSpeedWithin="17.71" meanIntervalHaltsPerVehicleWithin="0.00" meanIntervalDurationWithin="2.77" meanTimeLossWithin="0.27"/>
+   <interval begin="300.00" end="500.00" id="a13_rm_downstream" meanTravelTime="5.57" meanOverlapTravelTime="6.09" meanSpeed="11.27" meanHaltsPerVehicle="0.04" meanTimeLoss="2.62" vehicleSum="116" meanSpeedWithin="19.35" meanHaltsPerVehicleWithin="0.00" meanDurationWithin="2.97" vehicleSumWithin="3" meanIntervalSpeedWithin="19.35" meanIntervalHaltsPerVehicleWithin="0.00" meanIntervalDurationWithin="2.97" meanTimeLossWithin="0.25"/>
+   <interval begin="300.00" end="500.00" id="cw_ramp_inflow" meanTravelTime="8.82" meanOverlapTravelTime="10.99" meanSpeed="4.64" meanHaltsPerVehicle="0.49" meanTimeLoss="10.05" vehicleSum="43" meanSpeedWithin="1.57" meanHaltsPerVehicleWithin="1.67" meanDurationWithin="9.70" vehicleSumWithin="3" meanIntervalSpeedWithin="1.57" meanIntervalHaltsPerVehicleWithin="1.67" meanIntervalDurationWithin="9.70" meanTimeLossWithin="7.92"/>
+   <interval begin="300.00" end="500.00" id="cw_rm_downstream" meanTravelTime="4.47" meanOverlapTravelTime="4.89" meanSpeed="15.04" meanHaltsPerVehicle="0.00" meanTimeLoss="1.87" vehicleSum="302" meanSpeedWithin="14.88" meanHaltsPerVehicleWithin="0.00" meanDurationWithin="3.25" vehicleSumWithin="8" meanIntervalSpeedWithin="14.88" meanIntervalHaltsPerVehicleWithin="0.00" meanIntervalDurationWithin="3.25" meanTimeLossWithin="0.63"/>
+</e3Detector>

@@ -25,6 +25,7 @@ class VSLController:
             g_type = self.sim.geometry_exists(geometry_id)
             if g_type in ['EDGE', 'LANE']:
                 self.geometry[geometry_id] = {"g_type": g_type, "nc_speed_limit": self.sim.get_geometry_vals(geometry_id, "max_speed"), "avg_speeds": []}
+                self.sim.add_geometry_subscriptions(geometry_id, ["vehicle_count", "vehicle_speed"])
             else:
                 desc = "Geometry ID '{0}' not found.".format(geometry_id)
                 raise_error(KeyError, desc, self.sim.curr_step)
@@ -38,11 +39,21 @@ class VSLController:
     def __name__(self): return "VSLController"
 
     def get_curr_data(self) -> dict:
+        """
+        Return current controller data.
+        :return dict: VSL data
+        """
+
         vsl_dict = {"type": "VSL", "geometry_data": self.geometry, "init_time": self.init_time, "curr_time": self.curr_time,
                     "speed_limits": self.speed_limits, "times": self.times}
         return vsl_dict
     
     def set_limit(self, speed_limit: int|float|None = None) -> None:
+        """
+        Activates the VSL controller and sets a speed limit.
+        :param speed_limt: New speed limit, if not given, speed limit is set to last setting
+        """
+        
         if self.speed_limit == None and speed_limit == None:
             desc = "Cannot change speed limit as no value given."
             raise_error(ValueError, desc, self.sim.curr_step)
@@ -58,6 +69,10 @@ class VSLController:
                 for geometry_id in self.geometry.keys(): self.sim.set_geometry_vals(geometry_id, max_speed=self.speed_limit)
     
     def deactivate(self) -> None:
+        """
+        Deactivates VSL and resets speeds to default (defined by network).
+        """
+        
         self.activated = False
         self.speed_limit = -1
         for geometry_id in self.geometry.keys():
@@ -66,6 +81,10 @@ class VSLController:
         self.times.append(self.sim.curr_step)
     
     def reset(self) -> None:
+        """
+        Resets controller data.
+        """
+        
         self.speed_limits = []
         self.times = []
 
@@ -76,9 +95,13 @@ class VSLController:
             g_data["avg_speeds"] = []
     
     def update(self) -> None:
+        """
+        Updates controller data at time step.
+        """
+
         self.curr_time = self.sim.curr_step
         for g_id, g_data in self.geometry.items():
-            if self.sim.get_geometry_vals(g_id, "n_vehicles") > 0:
+            if self.sim.get_geometry_vals(g_id, "vehicle_count") > 0:
                 g_data["avg_speeds"].append(self.sim.get_geometry_vals(g_id, "vehicle_speed"))
             else: g_data["avg_speeds"].append(-1)
 
@@ -135,6 +158,11 @@ class RGController:
     def __name__(self): return "RGController"
 
     def get_curr_data(self) -> dict:
+        """
+        Return current controller data.
+        :return dict: RG data
+        """
+                
         rg_dict = {"type": "RG", "detector_ids": self.detector_info, "init_time": self.init_time, "curr_time": self.curr_time}
 
         if self.old_target != None: rg_dict["init_target"] = self.old_target
@@ -148,7 +176,15 @@ class RGController:
         
         return rg_dict
     
-    def activate(self, old_target: str|int|None = None, new_target: str|int|None = None, diversion_pct: float|None = None, highlight_colour: str|None = None) -> dict:
+    def activate(self, old_target: str|int|None = None, new_target: str|int|None = None, diversion_pct: float|None = None, highlight_colour: str|None = None) -> None:
+        """
+        Activates route guidance for drivers.
+        :param old_target:       If given, only drivers going to 'old_target' are diverted
+        :param new_target:       New target for driver, either edge ID or route
+        :param diversion_pct:    Used to only divert a percent of drivers (selected randomly)
+        :param highlight_colour: If given, diverted drivers are coloured
+        """
+        
         if self.target == None and new_target == None:
             desc = "Cannot activate as no target given."
             raise_error(ValueError, desc, self.sim.curr_step)
@@ -171,6 +207,9 @@ class RGController:
             elif not self.sim.suppress_warnings: raise_warning("RG controller '{0}' is already activated.".format(self.id), self.sim.curr_step)
 
     def deactivate(self) -> None:
+        """
+        Deactivate the controller and stop diverting drivers.
+        """
         
         if not self.activated:
             if not self.sim.suppress_warnings: raise_warning("Controller already deactivated.", self.sim.curr_step)
@@ -184,6 +223,10 @@ class RGController:
             else: self.activation_times = [(self.init_time, self.curr_time)]
     
     def reset(self) -> None:
+        """
+        Resets controller data.
+        """
+                
         self.n_diverted, self.total_vehs = [], []
         self.diverted_vehs = set([])
         self.activation_times = []

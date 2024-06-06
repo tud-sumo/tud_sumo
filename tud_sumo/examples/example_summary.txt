@@ -5,41 +5,43 @@
  |    Example traffic controllers, with a ramp meter, VSL     | 
  |               controller and route guidance.               | 
  *============================================================*
- |                 Simulation Run: 30/05/2024                 | 
- |               16:26:21 - 16:26:31 (0:00:10)                | 
+ |                 Simulation Run: 06/06/2024                 | 
+ |               16:36:01 - 16:36:11 (0:00:10)                | 
  *------------------------------------------------------------*
  | Number of Steps:                                       500 | 
  | Step Length:                                           1.0 | 
  | Avg. Step Duration:                                  0.02s | 
  | Units Type:                              Metric (km, km/h) | 
- | Seed:                                               random | 
+ | Seed:                                                    1 | 
  *============================================================*
  |                            Data                            | 
  *============================================================*
  |                        Vehicle Data                        | 
  *------------------------------------------------------------*
- | Avg. No. Vehicles:                                  764.63 | 
- | Peak No. Vehicles:                                    1290 | 
- | Final No. Vehicles:                                   1289 | 
+ | Avg. No. Vehicles:                                   757.9 | 
+ | Peak No. Vehicles:                                    1277 | 
+ | Final No. Vehicles:                                   1277 | 
  | Individual Data:                                        No | 
  * ---------------------------------------------------------- *
- | Total TTS:                                       382314.0s | 
- | Total Delay:                                      28600.0s | 
+ | Total TTS:                                       378952.0s | 
+ | Total Delay:                                      10689.0s | 
  | Individual Data:                                        No | 
  *------------------------------------------------------------*
  |                         Trip Data                          | 
  *------------------------------------------------------------*
- | Incomplete Trips:                             1289 (68.2%) | 
- | Completed Trips:                               600 (31.8%) | 
+ | Incomplete Trips:                             1276 (68.2%) | 
+ | Completed Trips:                               594 (31.8%) | 
  *------------------------------------------------------------*
  |                         Detectors                          | 
  *------------------------------------------------------------*
- |               Induction Loop Detectors: (8)                | 
- |        cw_down_occ_0, cw_down_occ_1, cw_down_occ_2,        | 
- |   cw_down_occ_3, cw_up_occ_0, cw_up_occ_1, cw_up_occ_2,    | 
- |                         rerouter_2                         | 
+ |               Induction Loop Detectors: (15)               | 
+ |       a13_ramp_inflow, cw_down_occ_0, cw_down_occ_1,       | 
+ |  cw_down_occ_2, cw_down_occ_3, cw_up_occ_0, cw_up_occ_1,   | 
+ |      cw_up_occ_2, rerouter_2, utsc_e_in, utsc_e_out,       | 
+ |      utsc_n_in_1, utsc_n_in_2, utsc_w_in, utsc_w_out       | 
  |                                                            | 
- |              Multi-Entry-Exit Detectors: (4)               | 
+ |              Multi-Entry-Exit Detectors: (7)               | 
+ |    a13_ramp_queue, a13_rm_downstream, a13_rm_upstream,     | 
  |      cw_ramp_inflow, cw_ramp_queue, cw_rm_downstream,      | 
  |                       cw_rm_upstream                       | 
  *------------------------------------------------------------*
@@ -52,11 +54,15 @@
  *------------------------------------------------------------*
  |                     utsc (Signalised)                      | 
  |           crooswijk_meter (Signalised, Metered)            | 
+ |              a13_meter (Signalised, Metered)               | 
  *------------------------------------------------------------*
  |                        Controllers                         | 
  *------------------------------------------------------------*
  |                    Route Guidance: (1)                     | 
  |                          rerouter                          | 
+ |                                                            | 
+ |                 Variable Speed Limits: (1)                 | 
+ |                            vsl                             | 
  *------------------------------------------------------------*
  |                    Event IDs & Statuses                    | 
  *------------------------------------------------------------*

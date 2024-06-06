@@ -296,7 +296,7 @@ class Simulation:
                     raise_error(KeyError, desc, self.curr_step)
                 if c_params['type'] in [1, 2, "VSL", "RG"]:
                     
-                    if c_params['type'] in [1, "VSL"]: controller = RGController(c_id, c_params, self)
+                    if c_params['type'] in [1, "VSL"]: controller = VSLController(c_id, c_params, self)
                     elif c_params['type'] in [2, "RG"]: controller = RGController(c_id, c_params, self)
                     
                     self.controllers[c_id] = controller
@@ -450,7 +450,7 @@ class Simulation:
 
         if self._automatic_subscriptions:
             subscriptions = ["speed"]
-            if self._get_individual_vehicle_data: subscriptions += ["acceleration", "destination", "heading", "altitude"]
+            if self._get_individual_vehicle_data: subscriptions += ["acceleration", "heading", "altitude"]
             else: subscriptions.append("position")
 
             self.add_vehicle_subscriptions(list(all_vehicles_in), subscriptions)
@@ -551,9 +551,9 @@ class Simulation:
         :return dict|list: Dict or list containing all vehicle IDs
         """
 
-        detector_ids = [detector_ids] if not isinstance(detector_ids, list) else detector_ids
+        detector_ids = [detector_ids] if not isinstance(detector_ids, (list, tuple)) else detector_ids
         if len(detector_ids) == 1: flatten = True
-        v_types = [v_types] if v_types != None and not isinstance(v_types, list) else v_types
+        v_types = [v_types] if v_types != None and not isinstance(v_types, (list, tuple)) else v_types
 
         vehicle_ids = [] if flatten else {}
         for detector_id in detector_ids:
@@ -916,6 +916,8 @@ class Simulation:
                     self._all_routes[route_id] = tuple(routing)
 
                 traci.vehicle.add(vehicle_id, route_id, vtype, departLane=origin_lane, departSpeed=initial_speed)
+                self._all_curr_vehicle_ids.add(vehicle_id)
+
             else:
                 desc = "Invalid routing given '[{0}]' (must have shape (2x1)).".format(",".join(routing))
                 raise_error(TypeError, desc, self.curr_step)
@@ -935,7 +937,9 @@ class Simulation:
             raise_error(TypeError, desc, self.curr_step)
 
         for vehicle_id in vehicle_ids:
-            if self.vehicle_exists(vehicle_id): traci.vehicle.remove(vehicle_id, tc.REMOVE)
+            if self.vehicle_exists(vehicle_id):
+                traci.vehicle.remove(vehicle_id, tc.REMOVE)
+                self._all_curr_vehicle_ids.remove(vehicle_id)
             else:
                 desc = "Unrecognised vehicle ID given ('{0}').".format(vehicle_id)
                 raise_error(KeyError, desc, self.curr_step)
@@ -968,7 +972,7 @@ class Simulation:
         """
         Creates a new subscription for vehicle variables.
         :param vehicle_ids: List of vehicle IDs or single ID
-        :param data_keys:   List of data_keys or single key, from [speed|is_stopped|max_speed|acceleration|position|altitude|heading|lane_idx|destination|route_id|route_idx|route_edges]
+        :param data_keys:   List of data_keys or single key, from [speed|is_stopped|max_speed|acceleration|position|altitude|heading|lane_idx|route_id|route_idx|route_edges]
         """
 
         if isinstance(data_keys, str): data_keys = [data_keys]
@@ -1082,7 +1086,7 @@ class Simulation:
         """
         Creates a new subscription for geometry (edge/lane) variables.
         :param geometry_ids: List of geometry IDs or single ID
-        :param data_keys: List of data_keys or single key, from [vehicle_count|vehicle_ids|speed|halting_no|occupancy]
+        :param data_keys: List of data_keys or single key, from [vehicle_count|vehicle_ids|vehicle_speed|halting_no|occupancy]
         """
 
         if isinstance(data_keys, str): data_keys = [data_keys]
@@ -1380,26 +1384,27 @@ class Simulation:
         if return_val: return list(data_vals.values())[0]
         else: return data_vals
     
-    def get_vehicle_data(self, vehicle_id: str, assert_exists: bool = True) -> dict:
+    def get_vehicle_data(self, vehicle_id: str) -> dict:
         """
         Get data for specified vehicle, updating _known_vehicles dict.
         :param vehicle_id: Vehicle ID
-        :param assert_exists: If True, error is raised if vehicle does not exist
         :return dict: Vehicle data dictionary, returns None if does not exist in simulation
         """
 
         if not self.vehicle_exists(vehicle_id):
-            if assert_exists:
-                desc = "Unrecognised vehicle ID found ('{0}').".format(vehicle_id)
-                raise_error(KeyError, desc, self.curr_step)
-            elif not self._suppress_warnings:
-                raise_warning("Unrecognised vehicle ID given ('{0}').".format(vehicle_id), self.curr_step)
-                return None
+            desc = "Unrecognised vehicle ID found ('{0}').".format(vehicle_id)
+            raise_error(KeyError, desc, self.curr_step)
         
-        vehicle_data = self.get_vehicle_vals(vehicle_id, ("speed", "acceleration" "is_stopped", "position", "altitude", "heading", "destination"))
+        static_data_keys = ("type", "length", "departure", "origin")
+        dynamic_data_keys = ("speed", "acceleration", "is_stopped", "position", "altitude", "heading", "destination")
+        vehicle_data = self.get_vehicle_vals(vehicle_id, dynamic_data_keys)
 
-        if vehicle_id not in self._known_vehicles.keys():
-            static_veh_data = self.get_vehicle_vals(vehicle_id, ("type", "length", "departure", "origin"))
+        if vehicle_id not in self._known_vehicles.keys(): new_vehicle = True
+        elif len(set(static_data_keys) - set(self._known_vehicles[vehicle_id].keys())) > 0: new_vehicle = True
+        else: new_vehicle = False
+
+        if new_vehicle:
+            static_veh_data = self.get_vehicle_vals(vehicle_id, static_data_keys)
 
             self._known_vehicles[vehicle_id] = {"type":        static_veh_data["type"],
                                                "longitude":    vehicle_data["position"][0],
@@ -1729,7 +1734,7 @@ class Simulation:
 
         return vtype in list(traci.vehicletype.getIDList())
 
-    def print_summary(self, save_file=None):
+    def print_summary(self, save_file=None) -> None:
         """
         Prints a summary of a sim_data file or dictionary, listing
         simulation details, vehicle statistics, detectors, controllers,
@@ -1738,6 +1743,99 @@ class Simulation:
         :param save_file: '.txt' filename, if given will be used to save summary
         """
         print_summary(self.all_data, save_file)
+
+    def print_sim_data(self) -> None:
+        """
+        Prints the structure of the current sim_data dictionary, with keys
+        and data types for values. Lists/tuples are displayed at max 2D. '*'
+        represents the maximum dimension value if the dimension size is inconsistent,
+        and '+' denotes the array dimension is greater than 2.
+        """
+        
+        print_sim_data(self.all_data)
+
+def print_sim_data(sim_data: Simulation|dict|str) -> None:
+    """
+    Prints the structure of a sim_data dictionary, from a Simulation
+    object, dict or filepath, with keys and data types for values. Lists/tuples
+    are displayed at max 2D. '*' represents the maximum dimension value if
+    the dimension size is inconsistent, and '+' denotes the array dimension is
+    greater than 2.
+    :param sim_data: Either Simulation object, dictionary or sim_data filepath
+    """
+    
+    if isinstance(sim_data, Simulation):
+        dictionary = sim_data.all_data
+    elif isinstance(sim_data, dict):
+        dictionary = sim_data
+    elif isinstance(sim_data, str):
+        if os.path.exists(sim_data):
+            with open(sim_data, "r") as fp:
+                dictionary = json.load(fp)
+        else:
+            desc = "sim_data file '{0}' not found.".format(sim_data)
+            raise_error(FileNotFoundError, desc)
+    else:
+        desc = "Invalid sim_data type (must be [Simulation|dict|str, not '{0}'])".format(type(sim_data).__name__)
+        raise_error(TypeError, desc)
+
+    _print_dict({dictionary["scenario_name"]: dictionary})
+
+def _print_dict(dictionary, indent=0, prev_indent="", prev_key=None):
+    dict_keys = list(dictionary.keys())
+    for key in dict_keys:
+        val, is_last = dictionary[key], key == dict_keys[-1]
+        curr_indent = _get_indent(indent, is_last, prev_indent)
+        if isinstance(val, dict) and prev_key != "trips":
+            print(curr_indent+key+":")
+            _print_dict(val, indent+1, curr_indent, key)
+        else:
+            if isinstance(val, (list, tuple, dict)):
+                type_str = type(val).__name__ + " " + _get_2d_shape(val)
+            else:
+                type_str = type(val).__name__
+                
+            print("{0}{1}: {2}".format(curr_indent, key, type_str))
+        prev_indent = curr_indent
+    
+def _get_indent(indent_no, last, prev_indent, col_width=6):
+    if indent_no == 0: return ""
+    else:
+        v_connector = "|{0}".format(" "*(col_width-1))
+        end = "─- "
+
+        connector = "└" if last else "├"
+        indent_str = "  "+v_connector*(indent_no-1) + connector + end
+        indent_arr, prev_indent = [*indent_str], [*prev_indent]
+
+        for idx, _ in enumerate(indent_arr):
+            if idx < len(prev_indent):
+                prev_char = prev_indent[idx]
+                if prev_char in [" ", "└"]: indent_arr[idx] = " "
+                elif prev_char in ["|"]: indent_arr[idx] = "|"
+                elif prev_char == "├" and indent_arr[idx] not in ["├", "└"]: indent_arr[idx] = "|"
+
+        indent_str = "".join(indent_arr)
+        return indent_str
+    
+def _get_2d_shape(array):
+
+    x = len(array)
+    arrs = []
+    deeper = False
+    for elem in array:
+        if isinstance(elem, (list, tuple)):
+            arrs.append(len(elem))
+            deeper = deeper or True in [isinstance(elem2, (list, tuple)) for elem2 in elem]
+
+    if len(arrs) > 0:
+        if len(set(arrs)) == 1:
+            return "({0}x{1})".format(x, arrs[0])
+        else:
+            return_str = "({0}x{1}*)".format(x, max(arrs))
+            if deeper: return_str += "+"
+            return return_str
+    else: return "(1x{0})".format(x)
 
 class TrackedJunction:
     def __init__(self, junc_id: str|int, sim: Simulation, junc_params: dict|str=None) -> None:
@@ -1769,7 +1867,7 @@ class TrackedJunction:
                 flow_params = junc_params["flow_params"]
                 if "inflow_detectors" in flow_params.keys() or "outflow_detectors" in flow_params.keys():
                     if not ("inflow_detectors" in flow_params.keys() and "outflow_detectors" in flow_params.keys()):
-                        desc = "Both 'inflow_detectors' and 'outflow_detectors' are required parameters to track flow (Junction ID: '{0}').".fomat(self.id)
+                        desc = "Both 'inflow_detectors' and 'outflow_detectors' are required parameters to track flow (Junction ID: '{0}').".format(self.id)
                         raise_error(KeyError, desc, self.sim.curr_step)
                     else:
 
@@ -1787,11 +1885,8 @@ class TrackedJunction:
 
                     if "flow_vtypes" in flow_params.keys(): self.flow_vtypes = ["all"] + flow_params["flow_vtypes"]
                     else: self.flow_vtypes = ["all"]
-
-                    self.avg_horizon = int(60 / self.sim.step_length) if "avg_horizon" not in flow_params.keys() else int(flow_params["avg_horizon"])
                     
                     self.v_in, self.v_out = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
-                    self.avg_inflow, self.avg_outflow = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
                     self.inflows, self.outflows = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
 
                     self.track_flow = True
@@ -1853,7 +1948,6 @@ class TrackedJunction:
 
         if self.track_flow:
             junc_dict["flows"] = {"inflow_detectors": self.inflow_detectors, "outflow_detectors": self.outflow_detectors,
-                                 "avg_inflows": self.avg_inflow, "avg_outflows": self.avg_outflow,
                                  "all_inflows": self.inflows, "all_outflows": self.outflows}
             
         if self.is_meter:
@@ -1887,7 +1981,6 @@ class TrackedJunction:
 
         if self.track_flow:
             self.v_in, self.v_out = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
-            self.avg_inflow, self.avg_outflow = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
             self.inflows, self.outflows = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
 
         if self.is_meter:
@@ -1932,20 +2025,18 @@ class TrackedJunction:
             self.curr_state = colours
 
         if self.track_flow:
-            step_v_in = self.sim.get_last_step_detector_vehicles(self.inflow_detectors, flatten=True)
-            step_v_out = self.sim.get_last_step_detector_vehicles(self.outflow_detectors, flatten=True)
-
+            
             for vtype in self.flow_vtypes:
-                new_v_in = [v_id for v_id in step_v_in if v_id not in self.v_in[vtype] and (vtype == "all" or v_id.startswith(vtype))]
+                new_v_in = self.sim.get_last_step_detector_vehicles(self.inflow_detectors, v_types=[vtype] if vtype != "all" else None, flatten=True)
+                new_v_in = list(set(new_v_in) - set(self.v_in[vtype]))
                 self.v_in[vtype] += new_v_in
                 self.inflows[vtype].append(len(new_v_in))
-                self.avg_inflow[vtype].append((sum(self.inflows[vtype][-self.avg_horizon:]) / len(self.inflows[vtype][-self.avg_horizon:])) / self.sim.step_length)
 
             for vtype in self.flow_vtypes:
-                new_v_out = [v_id for v_id in step_v_out if v_id not in self.v_out[vtype] and (vtype == "all" or v_id.startswith(vtype))]
+                new_v_out = self.sim.get_last_step_detector_vehicles(self.outflow_detectors, v_types=[vtype] if vtype != "all" else None, flatten=True)
+                new_v_out = list(set(new_v_out) - set(self.v_out[vtype]))
                 self.v_out[vtype] += new_v_out
                 self.outflows[vtype].append(len(new_v_out))
-                self.avg_outflow[vtype].append((sum(self.outflows[vtype][-self.avg_horizon:]) / len(self.outflows[vtype][-self.avg_horizon:])) / self.sim.step_length)
 
         if self.measure_queues:
 
@@ -2048,30 +2139,6 @@ class TrackedEdge:
         x_val = line.line_locate_point(p2, False)
         x_pct = x_val/line.length
         return x_pct
-    
-def _get_indent(indent_no, last):
-    if indent_no == 0: return ""
-    else:
-        connector = "└" if last else "├"
-        return "  "+"│   "*(indent_no-1) + connector + "── "
-
-def print_dict_tree(dictionary, indent=0):
-    for key, val in dictionary.items():
-        if isinstance(val, dict):
-            print(_get_indent(indent, key == list(dictionary.keys())[-1] and indent==1)+key)
-            print_dict_tree(val, indent+1)
-        else:
-            if isinstance(val, (list, tuple)):
-                b1, b2 = ("[", "]") if isinstance(val, list) else ("(", ")")
-                type_str = "" if len(val) == 0 else type(val[0]).__name__
-                try: shape = np.array(val).shape
-                except ValueError: shape = len((val))
-                type_str = b1 + type_str + b2 + " " + str(shape)
-            else: type_str = type(val).__name__
-            print("{0}{1}: {2}".format(_get_indent(indent, key == list(dictionary.keys())[-1] and indent==1), key, type_str))
-
-def print_sim_data_tree(sim_data):
-    print_dict_tree({"Simulation Data Structure:": sim_data})
 
 def print_summary(sim_data, save_file=None, tab_width=58):
     """
