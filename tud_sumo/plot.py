@@ -1,4 +1,4 @@
-import json, math, os.path, numpy as np
+import json, math, os.path, numpy as np, pickle as pkl
 from copy import deepcopy
 from random import random, seed, choice
 
@@ -43,9 +43,15 @@ class Plotter:
 
         elif isinstance(simulation, str):
 
+            if simulation.endswith(".json"): r_class, r_mode = json, "r"
+            elif simulation.endswith(".pkl"): r_class, r_mode = pkl, "rb"
+            else:
+                desc = "Invalid simulation file '{0}' (must be '.json' or '.pkl' file).".format(simulation)
+                raise_error(ValueError, desc)
+
             if os.path.exists(simulation):
-                with open(simulation, "r") as fp:
-                    self.sim_data = json.load(fp)
+                with open(simulation, r_mode) as fp:
+                    self.sim_data = r_class.load(fp)
                     self.units = self.sim_data["units"]
                     scenario_name = self.sim_data["scenario_name"]
             else:
@@ -140,16 +146,16 @@ class Plotter:
 
         plt.close()
         
-    def plot_junc_flows(self, junc_id: str, vtypes: list|tuple|None=None, plot_all: bool=True, time_range: list|tuple|None=None, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_junc_flows(self, junc_id: str, vehicle_types: list|tuple|None=None, plot_all: bool=True, time_range: list|tuple|None=None, show_events: bool=True, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot junction flow, either as inflow & outflow or number of vehicles at the intersection.
-        :param junc_id:  Junction ID
-        :param vtypes:   vType flows
-        :param plot_all: If true, plot total values as well as vType data
-        :param time_range: Plotting time range (in plotter class units)
-        :param show_events: Bool denoting whether to plot when events occur
-        :param fig_title: If given, will overwrite default title
-        :param save_fig: Output image filename, will show image if not given
+        :param junc_id:       Junction ID
+        :param vehicle_types: Vehicle type ID or list of IDs
+        :param plot_all:      If true, plot total values as well as vehicle type data
+        :param time_range:    Plotting time range (in plotter class units)
+        :param show_events:   Bool denoting whether to plot when events occur
+        :param fig_title:     If given, will overwrite default title
+        :param save_fig:      Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -181,24 +187,24 @@ class Plotter:
             desc = "Junction '{0}' not found in tracked junctions.".format(junc_id)
             raise_error(KeyError, desc)
 
-        if vtypes == None: vtypes = list(junc_flows["all_inflows"].keys())
-        elif not isinstance(vtypes, (list, tuple)): vtypes = [vtypes]
+        if vehicle_types == None: vehicle_types = list(junc_flows["all_inflows"].keys())
+        elif not isinstance(vehicle_types, (list, tuple)): vehicle_types = [vehicle_types]
 
-        if "all" in vtypes and not plot_all: vtypes.remove("all")
+        if "all" in vehicle_types and not plot_all: vehicle_types.remove("all")
 
         fig, ax = plt.subplots(1, 1)
 
-        for vtype_idx, vtype in enumerate(vtypes):
-            inflow_data, outflow_data = junc_flows["all_inflows"][vtype], junc_flows["all_outflows"][vtype]
+        for vehicle_type_idx, vehicle_type in enumerate(vehicle_types):
+            inflow_data, outflow_data = junc_flows["all_inflows"][vehicle_type], junc_flows["all_outflows"][vehicle_type]
             cumulative_inflow, cumulative_outflow = get_cumulative_arr(inflow_data), get_cumulative_arr(outflow_data)
             
             time_steps = get_time_steps(cumulative_inflow, self.time_unit, step)
             _, cumulative_inflow = limit_vals_by_range(time_steps, cumulative_inflow, time_range)
             time_steps, cumulative_outflow = limit_vals_by_range(time_steps, cumulative_outflow, time_range)
 
-            linewidth = 1.5 if vtype == "all" else 1
-            inflow_line = plt.plot(time_steps, cumulative_inflow, color=self._get_colour("WHEEL", vtype_idx==0), label=vtype+' in', linewidth=linewidth)
-            ax.plot(time_steps, cumulative_outflow, label=vtype + ' out', linestyle='--', linewidth=linewidth, color=inflow_line[-1].get_color())
+            linewidth = 1.5 if vehicle_type == "all" else 1
+            inflow_line = plt.plot(time_steps, cumulative_inflow, color=self._get_colour("WHEEL", vehicle_type_idx==0), label=vehicle_type+' in', linewidth=linewidth)
+            ax.plot(time_steps, cumulative_outflow, label=vehicle_type + ' out', linestyle='--', linewidth=linewidth, color=inflow_line[-1].get_color())
 
         fig_title = self.sim_label+"Vehicle Flows at Intersection '{0}'".format(junc_id) if fig_title == None else fig_title
         ax.set_title(fig_title, pad=20)
@@ -782,7 +788,7 @@ class Plotter:
         :param plot_cumulative: Bool denoting whether to plot cumulative values
         :param time_range:      Plotting time range (in plotter class units)
         :param show_events:     Bool denoting whether to plot when events occur
-        :param line_colour: Line colour for plot (defaults to TUD 'blauw')
+        :param line_colour:     Line colour for plot (defaults to TUD 'blauw')
         :param fig_title:       If given, will overwrite default title
         :param save_fig:        Output image filename, will show image if not given
         """
@@ -883,11 +889,11 @@ class Plotter:
 
         self.display_figure(save_fig)
 
-    def plot_od_trip_times(self, od_pairs: list|tuple|None=None, vtypes: list|tuple|None=None, ascending_vals: bool=True, trip_time_unit: str="m", time_range: list|tuple|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_od_trip_times(self, od_pairs: list|tuple|None=None, vehicle_types: list|tuple|None=None, ascending_vals: bool=True, trip_time_unit: str="m", time_range: list|tuple|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plots average trip times for Origin-Destination pairs.
         :param od_pairs:       (n x 2) list containing OD pairs. If not given, all OD pairs are plotted
-        :param vtypes:         List of vehicle types for included trips (defaults to all)
+        :param vehicle_types:  List of vehicle types for included trips (defaults to all)
         :param ascending_vals: If true, the largest values are plotted in the bottom-right, if false, top-left
         :param trip_time_unit: Time unit for displaying values, must be ['s'|'m'|'hr'], defaults to 'm'
         :param time_range:     Plotting time range (in plotter class units, separate to trip_time_unit parameter)
@@ -919,7 +925,7 @@ class Plotter:
             origin, destination = trip["origin"], trip["destination"]
             veh_type = trip["vehicle_type"]
 
-            if vtypes != None and veh_type not in veh_type: continue
+            if vehicle_types != None and veh_type not in veh_type: continue
             
             if origin not in od_trip_times.keys():
                 if add_new:
@@ -1033,7 +1039,7 @@ class Plotter:
 
         if inflow_detectors == None and outflow_detectors == None:
 
-            inflows, outflows = [0] * (end - start), [0] * (end - start)
+            inflows, outflows = [0] * (end - start+1), [0] * (end - start+1)
 
             trips = self.sim_data["data"]["trips"]
             for inc_trip in trips["incomplete"].values():
@@ -1476,7 +1482,7 @@ class Plotter:
                 if curr_time >= time_range[0] and curr_time <= time_range[1]:
                     
                     for vehicle_data in step_vehicles:
-                        vehicle_id, vehicle_pos = vehicle_data[0], vehicle_data[1]
+                        vehicle_id, vehicle_pos, vehicle_lane = vehicle_data[0], vehicle_data[1], vehicle_data[3]
                     
                         if edge_idx == 0 or first_step:
                             if vehicle_id not in line_data and vehicle_id not in ignore_list:

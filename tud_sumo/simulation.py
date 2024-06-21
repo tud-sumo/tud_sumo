@@ -1,7 +1,9 @@
 import os, sys, io, traci, sumolib, json, math
 import traci.constants as tc
+import pickle as pkl
 from tqdm import tqdm
 from copy import copy, deepcopy
+from random import choices, choice, random, seed as set_seed
 from events import EventScheduler, Event
 from controllers import VSLController, RGController
 from shapely.geometry import LineString, Point
@@ -49,6 +51,9 @@ class Simulation:
         self._get_individual_vehicle_data = True
         self._all_curr_vehicle_ids = set([])
         self._all_loaded_vehicle_ids = set([])
+        self._all_added_vehicles = set([])
+        self._all_removed_vehicles = set([])
+        self._all_vehicle_types = set([])
         self._known_vehicles = {}
         self._trips = {"incomplete": {}, "completed": {}}
 
@@ -100,15 +105,25 @@ class Simulation:
         
         if cmd_options != None: sumoCMD += cmd_options
 
-        if isinstance(seed, str):
-            if seed.upper() == "RANDOM": sumoCMD.append("--random")
-            else: sumoCMD += ["--seed", seed]
-        elif seed != None:
-            desc = "Invalid seed type (must be 'str', not '{0}').".format(type(seed).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        if seed != None:
+            if isinstance(seed, str):
+                if seed.upper() != "RANDOM" and not seed.isdigit():
+                    desc = "Invalid seed '{0}' (must be valid 'int' or str 'random').",format(seed)
+                    raise_error(ValueError, desc)
+                elif seed.upper() == "RANDOM":
+                    sumoCMD.append("--random")
+                else:
+                    sumoCMD += ["--seed", seed]
+                    set_seed(int(seed))
+            elif isinstance(seed, int):
+                sumoCMD += ["--seed", seed]
+                set_seed(seed)
+            else:
+                desc = "Invalid seed '{0}' type (must be 'str', not '{1}').".format(seed, type(seed).__name__)
+                raise_error(TypeError, desc, self.curr_step)
         
-        self._seed = seed
-
+        self._seed = int(seed) if seed.upper() != "RANDOM" else seed
+ 
         if isinstance(units, str):
             if units.upper() in ["METRIC", "IMPERIAL", "UK"]:
                 self.units = Units[["METRIC", "IMPERIAL", "UK"].index(units)]
@@ -134,16 +149,17 @@ class Simulation:
                                                                                             'exit_lanes': traci.multientryexit.getExitLanes(detector_id),
                                                                                             'entry_positions': traci.multientryexit.getEntryPositions(detector_id),
                                                                                             'exit_positions': traci.multientryexit.getExitPositions(detector_id)}}
-            self.add_detector_subscriptions(detector_id, ["vehicle_ids", "speed"])
+            self.add_detector_subscriptions(detector_id, ["vehicle_ids", "lsm_speed"])
             
         for detector_id in list(traci.inductionloop.getIDList()):
             self.available_detectors[detector_id] = {'type': 'inductionloop', 'position': {'lane_id': traci.inductionloop.getLaneID(detector_id), 'position': traci.inductionloop.getPosition(detector_id)}}
-            self.add_detector_subscriptions(detector_id, ["vehicle_ids", "speed", "occupancy"])
+            self.add_detector_subscriptions(detector_id, ["vehicle_ids", "lsm_speed", "lsm_occupancy"])
 
         self._all_juncs = list(traci.junction.getIDList())
         self._all_tls = list(traci.trafficlight.getIDList())
         self._all_edges = list(traci.edge.getIDList())
         self._all_lanes = list(traci.lane.getIDList())
+        self._all_vehicle_types = set(traci.vehicletype.getIDList())
 
         all_route_ids, self._all_routes = list(traci.route.getIDList()), {}
         for route_id in all_route_ids:
@@ -156,6 +172,51 @@ class Simulation:
         self._suppress_warnings = suppress_warnings
 
         self._sim_start_time = get_time_str()
+
+    def load_objects(self, object_parameters: dict|str) -> None:
+        """
+        Load all parameters for TUD SUMO objects: tracked edges/junctions, signal
+        phases, controllers and events.
+        :param object_parameters: Either dict containing object parameters or '.json|.pkl' filepath
+        """
+        
+        if isinstance(object_parameters, str):
+
+            if object_parameters.endswith(".json"): r_class, r_mode = json, "r"
+            elif object_parameters.endswith(".pkl"): r_class, r_mode = pkl, "rb"
+            else:
+                desc = "Invalid object parameter file '{0}' (must be '.json' or '.pkl).".format(object_parameters)
+                raise_error(ValueError, desc, self.curr_step)
+
+            if os.path.exists(object_parameters):
+                with open(object_parameters, r_mode) as fp:
+                    object_parameters = r_class.load(fp)
+            else:
+                desc = "Object parameter file '{0}' not found.".format(object_parameters)
+                raise_error(FileNotFoundError, desc, self.curr_step)
+
+        elif not isinstance(object_parameters, dict):
+            desc = "Invalid object_parameters type given '{0}' (must be [dict|str], not '{1}').".format(object_parameters, type(object_parameters).__name__)
+            raise_error(TypeError, desc, self.curr_step)
+
+        valid_params = {"edges": list, "junctions": dict, "phases": dict, "controllers": dict, "events": dict}
+        error, desc = test_input_dict(object_parameters, valid_params, "'object parameters")
+        if error != None: raise_error(error, desc, self.sim.curr_step)
+        
+        if "edges" in object_parameters:
+            self.add_tracked_edges(object_parameters["edges"])
+
+        if "junctions" in object_parameters:
+            self.add_tracked_junctions(object_parameters["junctions"])
+
+        if "phases" in object_parameters:
+            self.set_phases(object_parameters["phases"], overwrite=True)
+        
+        if "controllers" in object_parameters:
+            self.add_controllers(object_parameters["controllers"])
+
+        if "events" in object_parameters:
+            self.add_events(object_parameters["events"])
         
     def add_tracked_junctions(self, juncs: str|list|dict|None = None) -> None:
         """
@@ -185,9 +246,13 @@ class Simulation:
             else: track_list = junc_ids
 
         for junc_id in track_list:
-            junc_param = junc_params[junc_id] if junc_params != None else None
-            self.tracked_juncs[junc_id] = TrackedJunction(junc_id, self, junc_param)
-            self.tracked_juncs[junc_id].update_vals = True
+            if junc_id not in self.tracked_juncs:
+                junc_param = junc_params[junc_id] if junc_params != None else None
+                self.tracked_juncs[junc_id] = TrackedJunction(junc_id, self, junc_param)
+                self.tracked_juncs[junc_id].update_vals = True
+            else:
+                desc = "Junction with ID '{0}' already exists.".format(junc_id)
+                raise_error(ValueError, desc, self.curr_step)
 
     def reset_data(self) -> None:
         """
@@ -236,13 +301,20 @@ class Simulation:
 
     def save_data(self, filename: str|None = None, overwrite: bool = True, json_indent: int|None = 4) -> None:
         """
-        Save all vehicle, detector and junction data in a JSON file.
+        Save all vehicle, detector and junction data in a JSON or pickle file.
         :param filename:  Output filepath (defaults to ./'scenario_name'.json)
         :param overwrite: Prevent previous outputs being overwritten
         """
 
         if filename == None: filename = self.scenario_name
-        if not filename.endswith(".json"): filename += ".json"
+
+        if filename.endswith(".json"):
+            w_class, w_mode = json, "w"
+        elif filename.endswith(".pkl"):
+            w_class, w_mode = pkl, "wb"
+        else:
+            filename += ".json"
+            w_class, w_mode = json, "w"
 
         if os.path.exists(filename) and overwrite:
             if not self._suppress_warnings: raise_warning("File '{0}' already exists and will be overwritten.".format(filename), self.curr_step)
@@ -252,8 +324,9 @@ class Simulation:
 
         if self.all_data != None:
             if self._scheduler != None: self.all_data["data"]["events"] = self._scheduler.__dict__()
-            with open(filename, "w") as fp:
-                json.dump(self.all_data, fp, indent=json_indent)
+            with open(filename, w_mode) as fp:
+                if w_mode == "wb": w_class.dump(self.all_data, fp)
+                else: w_class.dump(self.all_data, fp, indent=json_indent)
         else:
             desc = "No data to save as a simulation has not been run."
             raise_error(IndexError, desc, self.curr_step)
@@ -268,6 +341,9 @@ class Simulation:
             if self.geometry_exists(edge_id) == None:
                 desc = "Geometry ID '{0}' not found.".format(edge_id)
                 raise_error(KeyError, desc, self.curr_step)
+            elif edge_id in self.tracked_edges:
+                desc = "Tracked geometry with ID '{0}' already exists.".format(edge_id)
+                raise_error(ValueError, desc, self.curr_step)
             self.tracked_edges[edge_id] = TrackedEdge(edge_id, self)
 
     def add_events(self, event_params: Event|list|dict|str) -> None:
@@ -288,6 +364,9 @@ class Simulation:
         controller_params = load_params(controller_params, "controller_params", self.curr_step)
 
         for c_id, c_params  in controller_params.items():
+            if c_id in self.controllers:
+                desc = "Controller with ID '{0}' already exists.".format(c_id)
+                raise_error(ValueError, desc, self.curr_step)
             if isinstance(c_params, (RGController, VSLController)):
                 self.controllers[c_id] = c_params
             elif isinstance(c_params, dict):
@@ -310,13 +389,13 @@ class Simulation:
 
         return self.controllers
 
-    def step_through(self, n_steps: int = 1, end_step: int|None = None, sim_dur: int|None = None, vTypes: list|None = None, keep_data: bool = True, append_data: bool = True, cumulative_data: bool = False, pbar: tqdm|None = None) -> dict:
+    def step_through(self, n_steps: int = 1, end_step: int|None = None, sim_dur: int|None = None, vehicle_types: list|None = None, keep_data: bool = True, append_data: bool = True, cumulative_data: bool = False, pbar: tqdm|None = None) -> dict:
         """
         Step through simulation from the current time until end_step, aggregating data during this period.
         :param n_steps:         Perform n steps of the simulation (defaults to 1)
         :param end_step:        End point for stepping through simulation (given instead of end_step)
         :param sim_dur:         Simulation duration
-        :param vTypes:          Vehicle type(s) to collect data of (list of types or string, defaults to all)
+        :param vehicle_types:   Vehicle type(s) to collect data of (list of types or string, defaults to all)
         :param keep_data:       Denotes whether to store data collected during this run (defaults to True)
         :param append_data:     Denotes whether to append simulation data to that of previous runs (defaults to True)
         :param cumulative_data: Denotes whether to get cumulative veh count and TTS values
@@ -369,7 +448,7 @@ class Simulation:
 
         while self.curr_step < end_step:
 
-            try: last_step_data, all_v_data = self.step(vTypes)
+            try: last_step_data, all_v_data = self.step(vehicle_types)
             except traci.exceptions.FatalTraCIError:
                 self._running = False
                 if self._ignore_TraCI_err:
@@ -426,11 +505,11 @@ class Simulation:
             self.reset_data()
             return None
 
-    def step(self, vTypes: list|None = None) -> dict:
+    def step(self, vehicle_types: list|None = None) -> dict:
         """
         Increment simulation by one time step, updating light state. step_through is recommended to run the simulation.
-        :param vTypes: Vehicle type(s) to collect data of (list of types or string, defaults to all)
-        :return dict:  Simulation data
+        :param vehicle_types: Vehicle type(s) to collect data of (list of types or string, defaults to all)
+        :return dict:         Simulation data
         """
 
         data = {"detectors": {}, "vehicles": {}}
@@ -449,42 +528,14 @@ class Simulation:
         all_vehicles_out = all_prev_vehicle_ids - self._all_curr_vehicle_ids
 
         if self._automatic_subscriptions:
-            subscriptions = ["speed"]
+            subscriptions = ["speed", "lane_idx"]
             if self._get_individual_vehicle_data: subscriptions += ["acceleration", "heading", "altitude"]
             else: subscriptions.append("position")
 
             self.add_vehicle_subscriptions(list(all_vehicles_in), subscriptions)
 
-        for veh_id in all_vehicles_in:
-            veh_data = self.get_vehicle_vals(veh_id, ("type", "route_id", "route_edges"))
-            veh_type, route_id, origin, destination = veh_data["type"], veh_data["route_id"], veh_data["route_edges"][0], veh_data["route_edges"][-1]
-            self._trips["incomplete"][veh_id] = {"route_id": route_id,
-                                                 "vehicle_type": veh_type,
-                                                 "departure": self.curr_step,
-                                                 "origin": origin,
-                                                 "destination": destination}
-
-        for veh_id in all_vehicles_out:
-            if veh_id in self._trips["incomplete"].keys():
-                trip_data = self._trips["incomplete"][veh_id]
-                veh_type, route_id, departure, origin, destination = trip_data["vehicle_type"], trip_data["route_id"], trip_data["departure"], trip_data["origin"], trip_data["destination"]
-                del self._trips["incomplete"][veh_id]
-                self._trips["completed"][veh_id] = {"route_id": route_id, "vehicle_type": veh_type, "departure": departure, "arrival": self.curr_step, "origin": origin, "destination": destination}
-            
-            else:
-                if veh_id in self._known_vehicles.keys():
-                    trip_data = {}
-                    if "departure" in self._known_vehicles[veh_id].keys():
-                        trip_data["departure"] = self._known_vehicles[veh_id]["departure"]
-                    if "arrival" in self._known_vehicles[veh_id].keys():
-                        trip_data["arrival"] = self._known_vehicles[veh_id]["arrival"]
-                    if "origin" in self._known_vehicles[veh_id].keys():
-                        trip_data["origin"] = self._known_vehicles[veh_id]["origin"]
-                    if "destination" in self._known_vehicles[veh_id].keys():
-                        trip_data["destination"] = self._known_vehicles[veh_id]["destination"]    
-                else: 
-                    desc = "Unrecognised vehicle ID '{0}' in completed trips.".format(veh_id)
-                    raise_error(KeyError, desc, self.curr_step)
+        self._vehicles_in(all_vehicles_in)
+        self._vehicles_out(all_vehicles_out)
 
         if self._junc_phases != None:
             update_junc_lights = []
@@ -512,23 +563,23 @@ class Simulation:
                 raise_error(KeyError, desc, self.curr_step)
             if self.available_detectors[detector_id]["type"] == "multientryexit":
 
-                detector_data = self.get_last_step_detector_data(detector_id, ["speed", "vehicle_count"])
-                data["detectors"][detector_id]["speeds"] = detector_data["speed"]
+                detector_data = self.get_detector_vals(detector_id, ["lsm_speed", "vehicle_count"])
+                data["detectors"][detector_id]["speeds"] = detector_data["lsm_speed"]
                 data["detectors"][detector_id]["vehicle_counts"] = detector_data["vehicle_count"]
                 
             elif self.available_detectors[detector_id]["type"] == "inductionloop":
 
-                detector_data = self.get_last_step_detector_data(detector_id, ["speed", "vehicle_count", "occupancy"])
-                data["detectors"][detector_id]["speeds"] = detector_data["speed"]
+                detector_data = self.get_detector_vals(detector_id, ["lsm_speed", "vehicle_count", "lsm_occupancy"])
+                data["detectors"][detector_id]["speeds"] = detector_data["lsm_speed"]
                 data["detectors"][detector_id]["vehicle_counts"] = detector_data["vehicle_count"]
-                data["detectors"][detector_id]["occupancies"] = detector_data["occupancy"]
+                data["detectors"][detector_id]["occupancies"] = detector_data["lsm_occupancy"]
 
             else:
                 if not self._suppress_warnings: raise_warning("Unknown detector type '{0}'.".format(self.available_detectors[detector_id]["type"]), self.curr_step)
 
             data["detectors"][detector_id]["vehicle_ids"] = self.get_last_step_detector_vehicles(detector_id)
 
-        total_v_data, all_v_data = self.get_all_vehicle_data(types=vTypes)
+        total_v_data, all_v_data = self.get_all_vehicle_data(types=vehicle_types)
         data["vehicles"]["no_vehicles"] = total_v_data["no_vehicles"]
         data["vehicles"]["tts"] = total_v_data["no_vehicles"] * self.step_length
         data["vehicles"]["delay"] = total_v_data["no_waiting"] * self.step_length
@@ -542,18 +593,81 @@ class Simulation:
 
         return data, all_v_data
 
-    def get_last_step_detector_vehicles(self, detector_ids: list|str, v_types: list|None = None, flatten: bool = False) -> dict|list:
+    def _vehicles_in(self, vehicle_ids: str|list|tuple, is_added: bool=False) -> None:
+
+        if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
+        elif isinstance(vehicle_ids, set): vehicle_ids = list(vehicle_ids)
+        elif not isinstance(vehicle_ids, (list, tuple)):
+            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
+            raise_error(TypeError, desc, self.curr_step)
+
+        for vehicle_id in vehicle_ids:
+            if vehicle_id not in self._all_curr_vehicle_ids: self._all_curr_vehicle_ids.add(vehicle_id)
+            if vehicle_id not in self._all_loaded_vehicle_ids: self._all_loaded_vehicle_ids.add(vehicle_id)
+            if vehicle_id not in self._all_added_vehicles and is_added: self._all_added_vehicles.add(vehicle_id)
+
+            veh_data = self.get_vehicle_vals(vehicle_id, ("type", "route_id", "route_edges"))
+            veh_type, route_id, origin, destination = veh_data["type"], veh_data["route_id"], veh_data["route_edges"][0], veh_data["route_edges"][-1]
+            self._trips["incomplete"][vehicle_id] = {"route_id": route_id,
+                                                     "vehicle_type": veh_type,
+                                                     "departure": self.curr_step,
+                                                     "origin": origin,
+                                                     "destination": destination}
+            
+    def _vehicles_out(self, vehicle_ids: str|list|tuple, is_removed: bool=False) -> None:
+
+        if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
+        elif isinstance(vehicle_ids, set): vehicle_ids = list(vehicle_ids)
+        elif not isinstance(vehicle_ids, (list, tuple)):
+            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
+            raise_error(TypeError, desc, self.curr_step)
+
+        for vehicle_id in vehicle_ids:
+            
+            if is_removed or vehicle_id in self._all_removed_vehicles:
+                if vehicle_id in self._trips["incomplete"].keys():
+                    self._trips["incomplete"][vehicle_id]["removal"] = self.curr_step
+                if vehicle_id not in self._all_removed_vehicles:
+                    self._all_removed_vehicles.add(vehicle_id)
+                if vehicle_id in self._all_curr_vehicle_ids:
+                    self._all_curr_vehicle_ids.remove(vehicle_id)
+                if vehicle_id in self._all_loaded_vehicle_ids:
+                    self._all_loaded_vehicle_ids.remove(vehicle_id)
+                continue
+
+            if vehicle_id in self._trips["incomplete"].keys():
+                trip_data = self._trips["incomplete"][vehicle_id]
+                veh_type, route_id, departure, origin, destination = trip_data["vehicle_type"], trip_data["route_id"], trip_data["departure"], trip_data["origin"], trip_data["destination"]
+                del self._trips["incomplete"][vehicle_id]
+                self._trips["completed"][vehicle_id] = {"route_id": route_id, "vehicle_type": veh_type, "departure": departure, "arrival": self.curr_step, "origin": origin, "destination": destination}
+            
+            else:
+                if vehicle_id in self._known_vehicles.keys():
+                    trip_data = {}
+                    if "departure" in self._known_vehicles[vehicle_id].keys():
+                        trip_data["departure"] = self._known_vehicles[vehicle_id]["departure"]
+                    if "arrival" in self._known_vehicles[vehicle_id].keys():
+                        trip_data["arrival"] = self._known_vehicles[vehicle_id]["arrival"]
+                    if "origin" in self._known_vehicles[vehicle_id].keys():
+                        trip_data["origin"] = self._known_vehicles[vehicle_id]["origin"]
+                    if "destination" in self._known_vehicles[vehicle_id].keys():
+                        trip_data["destination"] = self._known_vehicles[vehicle_id]["destination"]    
+                else: 
+                    desc = "Unrecognised vehicle ID '{0}' in completed trips.".format(vehicle_id)
+                    raise_error(KeyError, desc, self.curr_step)
+                    
+    def get_last_step_detector_vehicles(self, detector_ids: list|str, vehicle_types: list|None = None, flatten: bool = False) -> dict|list:
         """
         Get the IDs of vehicles that passed over the specified detectors.
-        :param detector_ids: detector ID or list of detector IDs (defaults to all)
-        :param v_types: Included vehicle types
-        :param flatten: If true, all IDs are returned in a 1D array, else a dict with vehicles for each detector
-        :return dict|list: Dict or list containing all vehicle IDs
+        :param detector_ids:  Detector ID or list of IDs (defaults to all)
+        :param vehicle_types: Included vehicle types
+        :param flatten:       If true, all IDs are returned in a 1D array, else a dict with vehicles for each detector
+        :return dict|list:    Dict or list containing all vehicle IDs
         """
 
         detector_ids = [detector_ids] if not isinstance(detector_ids, (list, tuple)) else detector_ids
         if len(detector_ids) == 1: flatten = True
-        v_types = [v_types] if v_types != None and not isinstance(v_types, (list, tuple)) else v_types
+        vehicle_types = [vehicle_types] if vehicle_types != None and not isinstance(vehicle_types, (list, tuple)) else vehicle_types
 
         vehicle_ids = [] if flatten else {}
         for detector_id in detector_ids:
@@ -562,10 +676,10 @@ class Simulation:
                 desc = "Detector ID '{0}' not found.".format(detector_id)
                 raise_error(KeyError, desc, self.curr_step)
             
-            detected_vehicles = self.get_last_step_detector_data(detector_id, "vehicle_ids")
+            detected_vehicles = self.get_detector_vals(detector_id, "vehicle_ids")
             
-            if v_types != None:
-                detected_vehicles = [vehicle_id for vehicle_id in detected_vehicles if self.get_vehicle_vals(vehicle_id, "type") in v_types]
+            if vehicle_types != None:
+                detected_vehicles = [vehicle_id for vehicle_id in detected_vehicles if self.get_vehicle_vals(vehicle_id, "type") in vehicle_types]
 
             if flatten: vehicle_ids += detected_vehicles
             else: vehicle_ids[detector_id] = detected_vehicles
@@ -574,89 +688,110 @@ class Simulation:
 
         return vehicle_ids
     
-    def get_last_step_detector_data(self, detector_id: int|str, data_keys: str|list) -> int|float|dict:
+    def get_detector_vals(self, detector_ids: list|tuple|str, data_keys: str|list) -> int|float|dict:
         """
         Get data values from a specific detector using a list of data keys.
-        :param detector_id: Detector ID
-        :param data_keys: List of keys from [vehicle_count|vehicle_ids|speed|halting_no (MEE only)|occupancy (IL only)|last_detection (IL only)], or single key
-        :return dict: Values by data_key (or single value)
+        :param detector_ids: Detector ID or list of IDs
+        :param data_keys:    List of keys from [vehicle_count|vehicle_ids|lsm_speed|halting_no (MEE only)|lsm_occupancy (IL only)|last_detection (IL only)], or single key
+        :return dict:        Values by data_key (or single value)
         """
 
-        if detector_id not in self.available_detectors.keys():
-            desc = "Detector with ID '{0}' not found.".format(detector_id)
-            raise_error(KeyError, desc, self.curr_step)
-        else:
-            detector_type = self.available_detectors[detector_id]["type"]
+        all_data_vals = {}
+        if isinstance(detector_ids, str): detector_ids = [detector_ids]
+        elif not isinstance(detector_ids, (list, tuple)):
+            desc = "Invalid detector_ids given '{0}' (must be [str|(str)], not '{1}').".format(detector_ids, type(detector_ids).__name__)
+            raise_error(TypeError, desc, self.curr_step)
 
-            match detector_type:
-                case "multientryexit": d_class = traci.multientryexit
-                case "inductionloop": d_class = traci.inductionloop
-                case "_":
-                    desc = "Only 'multientryexit' and 'inductionloop' detectors are currently supported (not '{0}').".format(detector_type)
-                    raise_error(ValueError, desc, self.curr_step)
-            
-        detector_data, subscribed_data = {}, d_class.getSubscriptionResults(detector_id)
-        if not isinstance(data_keys, (list, tuple)): data_keys = [data_keys]
-        for data_key in data_keys:
+        for detector_id in detector_ids:
+            if detector_id not in self.available_detectors.keys():
+                desc = "Detector with ID '{0}' not found.".format(detector_id)
+                raise_error(KeyError, desc, self.curr_step)
+            else:
+                detector_type = self.available_detectors[detector_id]["type"]
 
-            match data_key:
-                case "vehicle_count":
-                    if tc.LAST_STEP_VEHICLE_ID_LIST in subscribed_data: vehicle_count = len(list(subscribed_data[tc.LAST_STEP_VEHICLE_ID_LIST]))
-                    elif tc.LAST_STEP_VEHICLE_NUMBER in subscribed_data: vehicle_count = subscribed_data[tc.LAST_STEP_VEHICLE_NUMBER]
-                    else: vehicle_count = d_class.getLastStepVehicleNumber(detector_id)
-                    detector_data[data_key] = vehicle_count
+                match detector_type:
+                    case "multientryexit": d_class = traci.multientryexit
+                    case "inductionloop": d_class = traci.inductionloop
+                    case "_":
+                        desc = "Only 'multientryexit' and 'inductionloop' detectors are currently supported (not '{0}').".format(detector_type)
+                        raise_error(ValueError, desc, self.curr_step)
 
-                case "vehicle_ids":
-                    if tc.LAST_STEP_VEHICLE_ID_LIST in subscribed_data: vehicle_ids = subscribed_data[tc.LAST_STEP_VEHICLE_ID_LIST]
-                    else: vehicle_ids = d_class.getLastStepVehicleIDs(detector_id)
-                    detector_data[data_key] = list(vehicle_ids)
+            detector_data, subscribed_data = {}, d_class.getSubscriptionResults(detector_id)
+            if not isinstance(data_keys, (list, tuple)): data_keys = [data_keys]
+            for data_key in data_keys:
 
-                case "speed":
-                    if self.get_last_step_detector_data(detector_id, "vehicle_count") > 0:
-                        if tc.LAST_STEP_MEAN_SPEED in subscribed_data: speed = subscribed_data[tc.LAST_STEP_MEAN_SPEED]
-                        else: speed = d_class.getLastStepMeanSpeed(detector_id)
+                match data_key:
+                    case "type":
+                        detector_data[data_key] = detector_type
+
+                    case "position":
+                        detector_data[data_key] = self.available_detectors[detector_id][data_key]
+
+                    case "vehicle_count":
+                        if tc.LAST_STEP_VEHICLE_ID_LIST in subscribed_data: vehicle_count = len(list(subscribed_data[tc.LAST_STEP_VEHICLE_ID_LIST]))
+                        elif tc.LAST_STEP_VEHICLE_NUMBER in subscribed_data: vehicle_count = subscribed_data[tc.LAST_STEP_VEHICLE_NUMBER]
+                        else: vehicle_count = d_class.getLastStepVehicleNumber(detector_id)
+                        detector_data[data_key] = vehicle_count
+
+                    case "vehicle_ids":
+                        if tc.LAST_STEP_VEHICLE_ID_LIST in subscribed_data: vehicle_ids = subscribed_data[tc.LAST_STEP_VEHICLE_ID_LIST]
+                        else: vehicle_ids = d_class.getLastStepVehicleIDs(detector_id)
+                        detector_data[data_key] = list(vehicle_ids)
+
+                    case "lsm_speed":
+                        if self.get_detector_vals(detector_id, "vehicle_count") > 0:
+                            if tc.LAST_STEP_MEAN_SPEED in subscribed_data: speed = subscribed_data[tc.LAST_STEP_MEAN_SPEED]
+                            else: speed = d_class.getLastStepMeanSpeed(detector_id)
+                            
+                            if speed > 0:
+                                if self.units.name in ['IMPERIAL', 'UK']: speed *= 2.2369362920544
+                                else: speed *= 3.6
+                            detector_data[data_key] = speed
+                        else: detector_data[data_key] = -1
+
+                    case _:
+                        valid_keys = {"multientryexit": ["halting_no"], "inductionloop": ["last_detection", "lsm_occupancy"]}
                         
-                        if speed > 0:
-                            if self.units.name in ['IMPERIAL', 'UK']: speed *= 2.2369362920544
-                            else: speed *= 3.6
-                        detector_data[data_key] = speed
-                    else: detector_data[data_key] = -1
+                        if data_key not in [item for row in list(valid_keys.values()) for item in row]:
+                            desc = "Unrecognised data key ('{0}').".format(data_key)
+                            raise_error(KeyError, desc, self.curr_step)
+                        else:
+                            if data_key not in valid_keys[detector_type]:
+                                desc = "Invalid data key '{0}' for detector type '{1}'.".format(data_key, detector_type)
+                                raise_error(KeyError, desc, self.curr_step)
 
-                case _:
-                    known_key = True
-                    if detector_type == "multientryexit":
-                        if data_key == "halting_no":
-                            if tc.LAST_STEP_VEHICLE_HALTING_NUMBER in subscribed_data: halting_no = subscribed_data[tc.LAST_STEP_VEHICLE_HALTING_NUMBER]
-                            else: halting_no = d_class.getLastStepHaltingNumber(detector_id)
-                            detector_data[data_key] = halting_no
-                        else: known_key = False
-
-                    else:
-                        if data_key == "occupancy":
-                            if tc.LAST_STEP_OCCUPANCY in subscribed_data: occupancy = subscribed_data[tc.LAST_STEP_OCCUPANCY]
-                            else: occupancy = d_class.getLastStepOccupancy(detector_id)
-                            detector_data[data_key] = occupancy
-
-                        elif data_key == "last_detection":
-                            if tc.LAST_STEP_TIME_SINCE_DETECTION in subscribed_data: last_detection = subscribed_data[tc.LAST_STEP_TIME_SINCE_DETECTION]
-                            else: last_detection = d_class.getTimeSinceDetection(detector_id)
-                            detector_data[data_key] = last_detection
-                        else: known_key = False
-
-                    if not known_key:
-                        desc = "Unrecognised data key ('{0}').".format(data_key)
-                        raise_error(KeyError, desc, self.curr_step)
-                    
-        if len(data_keys) == 1: return detector_data[data_keys[0]]
-        else: return detector_data
+                        match detector_type:
+                            case "multientryexit":
+                                if tc.LAST_STEP_VEHICLE_HALTING_NUMBER in subscribed_data: halting_no = subscribed_data[tc.LAST_STEP_VEHICLE_HALTING_NUMBER]
+                                else: halting_no = d_class.getLastStepHaltingNumber(detector_id)
+                                detector_data[data_key] = halting_no
+                                
+                            case "inductionloop":
+                                if data_key == "lsm_occupancy":
+                                    if tc.LAST_STEP_OCCUPANCY in subscribed_data: occupancy = subscribed_data[tc.LAST_STEP_OCCUPANCY]
+                                    else: occupancy = d_class.getLastStepOccupancy(detector_id)
+                                    detector_data[data_key] = occupancy
+                                elif data_key == "last_detection":
+                                    if tc.LAST_STEP_TIME_SINCE_DETECTION in subscribed_data: last_detection = subscribed_data[tc.LAST_STEP_TIME_SINCE_DETECTION]
+                                    else: last_detection = d_class.getTimeSinceDetection(detector_id)
+                                    detector_data[data_key] = last_detection
+            
+            if len(detector_ids) == 1:
+                if len(data_keys) == 1: return detector_data[data_keys[0]]
+                else: return detector_data
+            else:
+                if len(data_keys) == 1: all_data_vals[detector_id] = detector_data[data_keys[0]]
+                else: all_data_vals[detector_id] = detector_data
+        
+        return all_data_vals
 
     def get_interval_detector_data(self, detector_id: int|str, n_steps: int, data_keys: str|list, avg_vals: bool = False) -> float|dict:
         """
         Get data previously collected by a detector over range (curr step - n_step -> curr_step).
         :param detector_id: Detector ID
-        :param n_steps: Interval length in steps (max at number of steps the simulation has run)
-        :param data_keys: List of keys from [vehicle_counts|speeds|occupancy (IL only)], or single key
-        :param avg_bool: Bool denoting whether to average values
+        :param n_steps:     Interval length in steps (max at number of steps the simulation has run)
+        :param data_keys:   List of keys from [vehicle_counts|speeds|occupancy (IL only)], or single key
+        :param avg_bool:    Bool denoting whether to average values
         :return float|dict: Either single value or dict containing values by data_key
         """
 
@@ -689,8 +824,8 @@ class Simulation:
         """
         Sets the phases for the simulation, starting at the next simulation step.
         :param new_junc_phases: Junction phases and times dictionary
-        :param start_phase: Phase number to start at, defaults to 0
-        :param overwrite: If true, the junc_phases dict is overwitten with new_junc_phases. If false, only specific junctions are overwritten.
+        :param start_phase:     Phase number to start at, defaults to 0
+        :param overwrite:       If true, the junc_phases dict is overwitten with new_junc_phases. If false, only specific junctions are overwritten.
         """
 
         # junc_phases = {junction_0: {phases: [phase_0, phase_1], times: [time_0, time_1]}, ...}
@@ -710,6 +845,10 @@ class Simulation:
 
             junc_phase = self._junc_phases[junc_id]
 
+            valid_params = {"times": list, "phases": list}
+            error, desc = test_input_dict(junc_phase, valid_params, "'{0}' flow".format(junc_id), required=True)
+            if error != None: raise_error(error, desc, self.sim.curr_step)
+
             for t in junc_phase["times"]:
                 if t < self.step_length:
                     desc = "Invalid phase duration (phase_dur ({0}) < resolution ({1}))\n.  - {2}".format(t, self.step_length, junc_phase)
@@ -727,7 +866,7 @@ class Simulation:
         """
         Sets a junction to a set colour/phase string for an indefinite amount of time. Can be used when tracking phases separately.
         :param junction_id: Junction ID
-        :param colour_str: Colour character ([r|y|g|-]) or phase string ([r|y|g|-]+)
+        :param colour_str:  Colour character ([r|y|g|-]) or phase string ([r|y|g|-]+)
         """
         
         if junction_id not in list(traci.trafficlight.getIDList()):
@@ -821,7 +960,7 @@ class Simulation:
         """
         Change to a different phase at the specified junction_id.
         :param junction_id: Junction ID
-        :param phase_no: Phase number
+        :param phase_no:    Phase number
         """
         
         if 0 < phase_no < len(self._junc_phases[junction_id]["phases"]):
@@ -851,14 +990,14 @@ class Simulation:
                 new_phase = "".join([new_phase[i] if new_phase[i] != '-' else curr_setting[i] for i in range(len(new_phase))])
             traci.trafficlight.setRedYellowGreenState(junction_id, new_phase)
 
-    def add_vehicle(self, vehicle_id: str, vtype: str, routing: str|list|tuple, initial_speed: str|float="max", origin_lane: str|int="first") -> None:
+    def add_vehicle(self, vehicle_id: str, vehicle_type: str, routing: str|list|tuple, initial_speed: str|float="max", origin_lane: str|int="first") -> None:
         """
         Add a new vehicle into the simulation.
-        :param vehicle_id: ID for new vehicle, must be unique
-        :param vtype:      Vehicle type ID for new vehicle
-        :param routing:    Either route ID or (2x1) list of edge IDs for origin-destination pair
+        :param vehicle_id:    ID for new vehicle, must be unique
+        :param vehicle_type:  Vehicle type ID for new vehicle
+        :param routing:       Either route ID or (2x1) list of edge IDs for origin-destination pair
         :param initial_speed: Initial speed at insertion, either [max|random] or number > 0
-        :param origin_lane: Lane for insertion at origin, either [random|free|allowed|best|first] or lane index
+        :param origin_lane:   Lane for insertion at origin, either [random|free|allowed|best|first] or lane index
         """
 
         if self.vehicle_exists(vehicle_id):
@@ -875,8 +1014,8 @@ class Simulation:
             desc = "Invalid initial_speed value given '{0}' (must be > 0).".format(initial_speed, type(initial_speed).__name__)
             raise_error(TypeError, desc, self.curr_step)
 
-        if not self.vtype_exists(vtype):
-            desc = "Vehicle type ID '{0}' not found.".format(vtype)
+        if not self.vehicle_type_exists(vehicle_type):
+            desc = "Vehicle type ID '{0}' not found.".format(vehicle_type)
             raise_error(TypeError, desc, self.curr_step)
 
         if not isinstance(origin_lane, (str|int)):
@@ -886,7 +1025,7 @@ class Simulation:
             route_id = routing
             routing = self.route_exists(route_id)
             if routing != None:
-                traci.vehicle.add(vehicle_id, route_id, vtype, departLane=origin_lane, departSpeed=initial_speed)
+                traci.vehicle.add(vehicle_id, route_id, vehicle_type, departLane=origin_lane, departSpeed=initial_speed)
             else:
                 desc = "Route ID '{0}' not found.".format(route_id)
                 raise_error(KeyError, desc, self.curr_step)
@@ -915,8 +1054,8 @@ class Simulation:
                     traci.route.add(route_id, routing)
                     self._all_routes[route_id] = tuple(routing)
 
-                traci.vehicle.add(vehicle_id, route_id, vtype, departLane=origin_lane, departSpeed=initial_speed)
-                self._all_curr_vehicle_ids.add(vehicle_id)
+                traci.vehicle.add(vehicle_id, route_id, vehicle_type, departLane=origin_lane, departSpeed=initial_speed)
+                self._vehicles_in(vehicle_id)
 
             else:
                 desc = "Invalid routing given '[{0}]' (must have shape (2x1)).".format(",".join(routing))
@@ -938,17 +1077,125 @@ class Simulation:
 
         for vehicle_id in vehicle_ids:
             if self.vehicle_exists(vehicle_id):
-                traci.vehicle.remove(vehicle_id, tc.REMOVE)
-                self._all_curr_vehicle_ids.remove(vehicle_id)
+                traci.vehicle.remove(vehicle_id, reason=tc.REMOVE_VAPORIZED)
+                self._vehicles_out(vehicle_id, is_removed=True)
             else:
                 desc = "Unrecognised vehicle ID given ('{0}').".format(vehicle_id)
                 raise_error(KeyError, desc, self.curr_step)
 
+    def cause_incident(self, duration: int, vehicle_ids: str|list|tuple=None, geometry_ids: str|list|tuple=None, n_vehicles: int=1, vehicle_separation=0, assert_n_vehicles: bool=False, edge_speed: int|None=-1, highlight_vehicles: bool=True, incident_id: str=None) -> bool:
+        """
+        Simulates an incident by stopping vehicles on the road for
+        a period of time, before removing them from the simulation.
+        Vehicles are either chosen randomly, randomly but constrained
+        to set edges, or by passing a list of vehicle IDs.
+        :param duration: Duration of incident (in simulation steps)
+        :param vehicle_ids: List of IDs for vehicles to include in the incident (overrides geometry_ids)
+        :param geometry_ids: List of edge IDs to randomly select vehicles from
+        :param n_vehicles: Number of vehicles in the incident, if randomly chosen
+        :param vehicle_separation: Factor denoting how separated randomly chosen vehicles are (0.1-1)
+        :param assert_n_vehicles: Denotes whether to throw an error if the correct number of vehicles cannot be found
+        :param edge_speed: New max speed for edges where incident vehicles are located (defaults to 15km/h or 10mph)
+        :param highlight_vehicles: Denotes whether to highlight vehicles in the SUMO GUI
+        :param incident_id: Incident event ID used in the simulation data file
+        """
+        
+        if incident_id == None:
+            id_idx = 1
+            while self._scheduler.get_event_status("incident_{0}".format(id_idx)) != None: id_idx += 1
+            incident_id = "incident_{0}".format(id_idx)
+
+        event_dict = {"start_time": (self.curr_step + 1) * self.step_length, "end_time": (self.curr_step + duration) * self.step_length,
+                      "vehicles": {"actions": {"speed": 0}, "effect_duration": duration, "remove_affected_vehicles": True,
+                                   "speed_safety_checks": False, "lc_safety_checks": False}}
+        
+        check_n_vehicles = vehicle_ids == None
+        if geometry_ids == None and vehicle_ids == None:
+            if n_vehicles < len(self._all_curr_vehicle_ids) and n_vehicles > 0:
+                all_geometry_ids, geometry_ids, vehicle_ids, found_central = list(self._all_edges), [], [], False
+                while not found_central:
+                    central_id = choice(all_geometry_ids)
+                    found_central = self.get_geometry_vals(central_id, "vehicle_count") > 0
+
+                vehicle_separation = min(0.9, max(0, vehicle_separation))
+                searched, to_search, prob = [], [central_id], 1 - vehicle_separation
+                while len(vehicle_ids) < n_vehicles and len(to_search) > 0:
+                    curr_geometry_id = choice(to_search)
+
+                    all_geometry_vehicles = self.get_geometry_vals(curr_geometry_id, "vehicle_ids")
+                    
+                    for g_veh_id in all_geometry_vehicles:
+                        if random() < prob:
+                            vehicle_ids.append(g_veh_id)
+                            geometry_ids.append(curr_geometry_id)
+                            if len(vehicle_ids) >= n_vehicles:
+                                break
+
+                    if len(vehicle_ids) < n_vehicles:
+                        to_search.remove(curr_geometry_id)
+                        searched.append(curr_geometry_id)
+                        
+                        connected_edges = self.get_geometry_vals(curr_geometry_id, "connected_edges")
+                        to_search += connected_edges['incoming']
+                        to_search += connected_edges['outgoing']
+
+                        to_search = [g_id for g_id in to_search if g_id not in searched]
+
+                geometry_ids = list(set(geometry_ids))
+
+            else:
+                desc = "Invalid n_vehicles '{0}' (must be 0 < '{0}' < no. vehicles in the simulation '{1}').".format(n_vehicles, len(self._all_curr_vehicle_ids))
+                raise_error(ValueError, desc, self.curr_step)
+
+        elif geometry_ids != None:
+            if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
+            elif not isinstance(geometry_ids, (list, tuple)):
+                desc = "Invalid geometry_ids given '{0}' (must be [str|(str)], not '{1}').".format(geometry_ids, type(geometry_ids).__name__)
+                raise_error(TypeError, desc, self.curr_step)
+
+            all_geometry_vehicles = self.get_last_step_geometry_vehicles(geometry_ids)
+            vehicle_ids = choices(all_geometry_vehicles, min(n_vehicles, len(all_geometry_vehicles)))
+            
+        if check_n_vehicles:
+            if len(vehicle_ids) != n_vehicles:
+                if assert_n_vehicles:
+                    desc = "Incident could not be started (could not find enough vehicles, {0} != {1}).".format()
+                    raise_error(ValueError, desc, self.curr_step)
+                else:
+                    raise_warning("Incident could not be started (could not find enough vehicles, {0} != {1}).".format())
+                    return False
+
+        if vehicle_ids != None:
+            if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
+            elif not isinstance(vehicle_ids, (list, tuple)):
+                desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
+                raise_error(TypeError, desc, self.curr_step)
+
+            for vehicle_id in vehicle_ids:
+                if not self.vehicle_exists(vehicle_id):
+                    desc = "Unrecognised vehicle ID given ('{0}').".format(vehicle_id)
+                    raise_error(KeyError, desc, self.curr_step)
+                elif highlight_vehicles:
+                    self.set_vehicle_vals(vehicle_id, highlight=True)
+
+            event_dict["vehicles"]["vehicle_ids"] = vehicle_ids
+        
+            if edge_speed != None:
+                if edge_speed == -1: edge_speed = 15 if self.units.name == "METRIC" else 10
+                event_dict["edges"] = {"edge_ids": geometry_ids, "actions": {"max_speed": edge_speed}}
+
+        self.add_events({incident_id: event_dict})
+        return True
+            
     def vehicle_exists(self, vehicle_id: str) -> bool:
         """
         Tests if a vehicle exists in the network and has departed.
         :return bool: True if ID in list of current vehicle IDs 
         """
+        if not isinstance(vehicle_id, str):
+            desc = "Invalid vehicle_id given '{0}' (must be 'str', not '{1}').".format(vehicle_id, type(vehicle_id).__name__)
+            raise_error(TypeError, desc, self.curr_step)
+
         return vehicle_id in self._all_curr_vehicle_ids
     
     def vehicle_loaded(self, vehicle_id: str) -> bool:
@@ -956,6 +1203,10 @@ class Simulation:
         Tests if a vehicle is loaded (may not have departed).
         :return bool: True if ID in list of loaded vehicle IDs
         """
+        if not isinstance(vehicle_id, str):
+            desc = "Invalid vehicle_id given '{0}' (must be 'str', not '{1}').".format(vehicle_id, type(vehicle_id).__name__)
+            raise_error(TypeError, desc, self.curr_step)
+
         return vehicle_id in self._all_loaded_vehicle_ids
     
     def vehicle_departed(self, vehicle_id: str) -> bool:
@@ -963,16 +1214,20 @@ class Simulation:
         Tests if a vehicle is loaded but has not departed yet.
         :return bool: True if vehicle has not departed yet
         """
-        if not self.vehicle_loaded(vehicle_id):
+        if not isinstance(vehicle_id, (list, tuple)):
+            desc = "Invalid vehicle_id given '{0}' (must be 'str', not '{1}').".format(vehicle_id, type(vehicle_id).__name__)
+            raise_error(TypeError, desc, self.curr_step)
+        elif not self.vehicle_loaded(vehicle_id):
             desc = "Vehicle with ID '{0}' has not been loaded.".format(vehicle_id)
             raise_error(KeyError, desc, self.curr_step)
+        
         return vehicle_id in self._all_to_depart_vehicle_ids
     
     def add_vehicle_subscriptions(self, vehicle_ids: str|list|tuple, data_keys: str|list|tuple) -> None:
         """
         Creates a new subscription for vehicle variables.
         :param vehicle_ids: List of vehicle IDs or single ID
-        :param data_keys:   List of data_keys or single key, from [speed|is_stopped|max_speed|acceleration|position|altitude|heading|lane_idx|route_id|route_idx|route_edges]
+        :param data_keys:   List of data_keys or single key, from [speed|is_stopped|max_speed|acceleration|position|altitude|heading|edge_id|lane_idx|route_id|route_idx|route_edges]
         """
 
         if isinstance(data_keys, str): data_keys = [data_keys]
@@ -1086,7 +1341,7 @@ class Simulation:
         """
         Creates a new subscription for geometry (edge/lane) variables.
         :param geometry_ids: List of geometry IDs or single ID
-        :param data_keys: List of data_keys or single key, from [vehicle_count|vehicle_ids|vehicle_speed|halting_no|occupancy]
+        :param data_keys:    List of data_keys or single key, from [vehicle_count|vehicle_ids|vehicle_speed|halting_no|occupancy]
         """
 
         if isinstance(data_keys, str): data_keys = [data_keys]
@@ -1136,305 +1391,449 @@ class Simulation:
 
             g_class.unsubscribe(geometry_id)
     
-    def set_vehicle_vals(self, vehicle_id: str, **kwargs) -> None:
+    def set_vehicle_vals(self, vehicle_ids: list|tuple|str, **kwargs) -> None:
         """
         Calls the TraCI API to change a vehicle's state.
-        :param vehicle_id: Vehicle ID
-        :param highlight: Highlights vehicle with specified colour [str|(int)]
-        :param speed: Set new speed value [int|float]
-        :param max_speed: Set new max speed value [int|float]
+        :param vehicle_ids:  Vehicle ID or list of IDs
+        :param highlight:    Highlights vehicle with specified colour [str|(int)]
+        :param speed:        Set new speed value [int|float]
+        :param max_speed:    Set new max speed value [int|float]
         :param acceleration: Set acceleration for a given duration ([int|float], [int|float])
-        :param lane_idx: Try and change lane for a given duration (int, [int|float])
-        :param target: Set vehicle destination edge ID [str]
-        :param route_id: Set vehicle route by route ID or list of edges (str)
-        :param route_edges: Set vehicle route by list of edges ([str])
+        :param lane_idx:     Try and change lane for a given duration (int, [int|float])
+        :param target:       Set vehicle destination edge ID [str]
+        :param route_id:     Set vehicle route by route ID or list of edges (str)
+        :param route_edges:  Set vehicle route by list of edges ([str])
+        :param speed_safety_checks: (Indefinitely) set whether speed/acceleration safety constraints are followed when setting speed (bool)
+        :param lc_safety_checks: (Indefinitely) set whether lane changing safety constraints are followed when setting lane (bool)
         """
-        
-        if not self.vehicle_exists(vehicle_id):
-            desc = "Unrecognised vehicle ID given ('{0}').".format(vehicle_id)
-            raise_error(KeyError, desc, self.curr_step)
-        
-        for command, value in kwargs.items():
-            match command:
-                case "highlight":
-                    if value != None:
-                        colour = value
-                        if isinstance(colour, str):
-                            if "#" in colour: colour = colour.lstrip("#")
-                            if len(colour) != 6:
-                                desc = "({0}): '{1}' is not a valid hex colour.".format(command, colour)
+
+        if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
+        elif not isinstance(vehicle_ids, (list, tuple)):
+            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
+            raise_error(TypeError, desc, self.curr_step)
+
+        for vehicle_id in vehicle_ids:
+            if not self.vehicle_exists(vehicle_id):
+                desc = "Unrecognised vehicle ID given ('{0}').".format(vehicle_id)
+                raise_error(KeyError, desc, self.curr_step)
+            
+            for command, value in kwargs.items():
+                match command:
+                    case "colour":
+                        if value != None:
+                            colour = value
+                            if isinstance(colour, str):
+                                if "#" in colour: colour = colour.lstrip("#")
+                                if len(colour) != 6:
+                                    desc = "({0}): '{1}' is not a valid hex colour.".format(command, colour)
+                                    raise_error(ValueError, desc, self.curr_step)
+                                colour = tuple(int(colour[i:i+2], 16) for i in (0, 2, 4))
+                            elif not isinstance(colour, (list, tuple)):
+                                desc = "({0}): Invalid colour (must be [str|list|tuple], not '{1}').".format(command, type(colour).__name__)
+                                raise_error(TypeError, desc, self.curr_step)
+                            elif len(colour) not in [3, 4] or all(x > 255 for x in colour) or all(x < 0 for x in colour):
+                                desc = "({0}): '{1}' is not a valid RGB or RGBA colour.".format(command, colour)
                                 raise_error(ValueError, desc, self.curr_step)
-                            colour = tuple(int(colour[i:i+2], 16) for i in (0, 2, 4))
-                        elif not isinstance(colour, (list, tuple)):
-                            desc = "({0}): Invalid colour (must be [str|list|tuple], not '{1}').".format(command, type(colour).__name__)
-                            raise_error(TypeError, desc, self.curr_step)
-                        elif len(colour) not in [3, 4] or all(x > 255 for x in colour) or all(x < 0 for x in colour):
-                            desc = "({0}): '{1}' is not a valid RGB or RGBA colour.".format(command, colour)
-                            raise_error(ValueError, desc, self.curr_step)
-                        
-                        if len(colour) == 3: colour = list(colour) + [255]
+                            
+                            if len(colour) == 3: colour = list(colour) + [255]
 
-                        traci.vehicle.setColor(vehicle_id, colour)
-                    else:
-                        v_type = self.get_vehicle_vals(vehicle_id, "type")
-                        type_colour = tuple(traci.vehicletype.getColor(v_type))
-                        traci.vehicle.setColor(vehicle_id, type_colour)
+                            traci.vehicle.setColor(vehicle_id, colour)
+                        else:
+                            vehicle_type = self.get_vehicle_vals(vehicle_id, "type")
+                            type_colour = tuple(traci.vehicletype.getColor(vehicle_type))
+                            traci.vehicle.setColor(vehicle_id, type_colour)
+                    
+                    case "highlight":
+                        if isinstance(value, bool):
+                            if value: traci.vehicle.highlight(vehicle_id)
+                            else: traci.vehicle.highlight(vehicle_id, color=(0, 0, 0, 0))
+                        else:
+                            desc = "({0}): Invalid speed_safety_checks value '{1}' (must be (str), not '{2}').".format(command, value, type(value).__name__)
+                            raise_error(TypeError, desc, self.curr_step)
 
-                case "speed":
-                    if isinstance(value, (int, float)): 
-                        if self.units.name in ['IMPERIAL', 'UK']: traci.vehicle.setSpeed(vehicle_id, value / 2.2369362920544)
-                        else: traci.vehicle.setSpeed(vehicle_id, value / 3.6)
-                    else:
-                        desc = "({0}): Invalid speed value '{1}' (must be [int|float], not '{2}').".format(command, value, type(value).__name__)
-                        raise_error(TypeError, desc, self.curr_step)
-                
-                case "max_speed":
-                    if isinstance(value, (int, float)):
-                        if self.units.name in ['IMPERIAL', 'UK']: traci.vehicle.setMaxSpeed(vehicle_id, value / 2.2369362920544)
-                        else: traci.vehicle.setMaxSpeed(vehicle_id, value / 3.6)
-                    else:
-                        desc = "({0}): Invalid max speed value '{1}' (must be [int|float], not '{2}').".format(command, value, type(value).__name__)
-                        raise_error(TypeError, desc, self.curr_step)
-                
-                case "acceleration":
-                    if isinstance(value, (list, tuple)) and len(value) == 2:
-                        if not isinstance(value[0], (int, float)):
-                            desc = "({0}): Invalid acceleration '{1}' (must be [int|float], not '{2}').".format(command, value[0], type(value[0]).__name__)
+                    case "speed":
+                        if isinstance(value, (int, float)): 
+                            if self.units.name in ['IMPERIAL', 'UK']: traci.vehicle.setSpeed(vehicle_id, value / 2.2369362920544)
+                            else: traci.vehicle.setSpeed(vehicle_id, value / 3.6)
+                        else:
+                            desc = "({0}): Invalid speed value '{1}' (must be [int|float], not '{2}').".format(command, value, type(value).__name__)
                             raise_error(TypeError, desc, self.curr_step)
-                        if not isinstance(value[1], (int, float)):
-                            desc = "({0}): Invalid laneIndex '{1}' (must be [int|float], not '{2}').".format(command, value[1], type(value[1]).__name__)
+                    
+                    case "max_speed":
+                        if isinstance(value, (int, float)):
+                            if self.units.name in ['IMPERIAL', 'UK']: traci.vehicle.setMaxSpeed(vehicle_id, value / 2.2369362920544)
+                            else: traci.vehicle.setMaxSpeed(vehicle_id, value / 3.6)
+                        else:
+                            desc = "({0}): Invalid max_speed value '{1}' (must be [int|float], not '{2}').".format(command, value, type(value).__name__)
                             raise_error(TypeError, desc, self.curr_step)
-                        traci.vehicle.setAcceleration(vehicle_id, float(value[0]), float(value[1]))
-                    else:
-                        desc = "({0}): '{0}' requires 2 parameters (acceleration [int|float], duration [int|float])".format(command)
-                        raise_error(TypeError, desc, self.curr_step)
+                    
+                    case "acceleration":
+                        if isinstance(value, (list, tuple)) and len(value) == 2:
+                            if not isinstance(value[0], (int, float)):
+                                desc = "({0}): Invalid acceleration '{1}' (must be [int|float], not '{2}').".format(command, value[0], type(value[0]).__name__)
+                                raise_error(TypeError, desc, self.curr_step)
+                            if not isinstance(value[1], (int, float)):
+                                desc = "({0}): Invalid duration '{1}' (must be [int|float], not '{2}').".format(command, value[1], type(value[1]).__name__)
+                                raise_error(TypeError, desc, self.curr_step)
+                            traci.vehicle.setAcceleration(vehicle_id, float(value[0]), float(value[1]))
+                        else:
+                            desc = "({0}): '{0}' requires 2 parameters (acceleration [int|float], duration [int|float])".format(command)
+                            raise_error(TypeError, desc, self.curr_step)
 
-                case "lane_idx":
-                    if isinstance(value, (list, tuple)) and len(value) == 2:
-                        if not isinstance(value[0], int):
-                            desc = "({0}): Invalid laneIndex '{1}' (must be int, not '{2}').".format(command, value[0], type(value[0]).__name__)
+                    case "lane_idx":
+                        if isinstance(value, (list, tuple)) and len(value) == 2:
+                            if not isinstance(value[0], int):
+                                desc = "({0}): Invalid lane_idx '{1}' (must be int, not '{2}').".format(command, value[0], type(value[0]).__name__)
+                                raise_error(TypeError, desc, self.curr_step)
+                            if not isinstance(value[1], (int, float)):
+                                desc = "({0}): Invalid duration '{1}' (must be [int|float], not '{2}').".format(command, value[1], type(value[1]).__name__)
+                                raise_error(TypeError, desc, self.curr_step)
+                            traci.vehicle.changeLane(vehicle_id, value[0], float(value[1]))
+                        else:
+                            desc = "({0}): '{0}' requires 2 parameters (lane_idx [int], duration [int|float])".format(command)
                             raise_error(TypeError, desc, self.curr_step)
-                        if not isinstance(value[1], (int, float)):
-                            desc = "({0}): Invalid duration '{1}' (must be [int|float], not '{2}').".format(command, value[1], type(value[1]).__name__)
-                            raise_error(TypeError, desc, self.curr_step)
-                        traci.vehicle.changeLane(vehicle_id, value[0], float(value[1]))
-                    else:
-                        desc = "({0}): '{0}' requires 2 parameters (laneIndex [int], duration [int|float])".format(command)
-                        raise_error(TypeError, desc, self.curr_step)
 
-                case "destination":
-                    if isinstance(value, str):
-                        if value not in self._all_edges:
-                            desc = "({0}): Edge ID '{1}' not found.".format(command, value)
-                            raise_error(KeyError, desc, self.curr_step)
-                        traci.vehicle.changeTarget(vehicle_id, value)
-                    else:
-                        desc = "({0}): Invalid edge ID '{1}' (must be str, not '{2}').".format(command, value, type(value).__name__)
-                        raise_error(TypeError, desc, self.curr_step)
-                
-                case "route_id":
-                    if isinstance(value, str):
-                        if value not in self._all_routes.keys():
-                            desc = "({0}): Route ID '{1}' not found.".format(command, value)
-                            raise_error(KeyError, desc, self.curr_step)
-                        traci.vehicle.setRouteID(vehicle_id, value)
-                    else:
-                        desc = "({0}): Invalid route ID value '{1}' (must be str, not '{2}').".format(command, value, type(value).__name__)
-                        raise_error(TypeError, desc, self.curr_step)
-                
-                case "route_edges":
-                    if isinstance(value, (list, tuple)) and all(isinstance(x, str) for x in value):
-                        for e_id in value:
-                            if e_id not in self._all_edges:
-                                desc = "({0}): Edge ID '{1}' in route edges not found.".format(command, e_id)
+                    case "destination":
+                        if isinstance(value, str):
+                            if value not in self._all_edges:
+                                desc = "({0}): Edge ID '{1}' not found.".format(command, value)
                                 raise_error(KeyError, desc, self.curr_step)
-                        traci.vehicle.setRoute(value)
-                    else:
-                        desc = "({0}): Invalid route egdes value '{1}' (must be (str), not '{2}').".format(command, value, type(value).__name__)
+                            traci.vehicle.changeTarget(vehicle_id, value)
+                        else:
+                            desc = "({0}): Invalid edge_id '{1}' (must be str, not '{2}').".format(command, value, type(value).__name__)
+                            raise_error(TypeError, desc, self.curr_step)
+                    
+                    case "route_id":
+                        if isinstance(value, str):
+                            if value not in self._all_routes.keys():
+                                desc = "({0}): Route ID '{1}' not found.".format(command, value)
+                                raise_error(KeyError, desc, self.curr_step)
+                            traci.vehicle.setRouteID(vehicle_id, value)
+                        else:
+                            desc = "({0}): Invalid route_id value '{1}' (must be str, not '{2}').".format(command, value, type(value).__name__)
+                            raise_error(TypeError, desc, self.curr_step)
+                    
+                    case "route_edges":
+                        if isinstance(value, (list, tuple)) and all(isinstance(x, str) for x in value):
+                            for e_id in value:
+                                if e_id not in self._all_edges:
+                                    desc = "({0}): Edge ID '{1}' in route edges not found.".format(command, e_id)
+                                    raise_error(KeyError, desc, self.curr_step)
+                            traci.vehicle.setRoute(vehicle_id, value)
+                        else:
+                            desc = "({0}): Invalid route_egdes value '{1}' (must be (str), not '{2}').".format(command, value, type(value).__name__)
+                            raise_error(TypeError, desc, self.curr_step)
+
+                    case "speed_safety_checks":
+                        if isinstance(value, bool):
+                            if value: traci.vehicle.setSpeedMode(vehicle_id, 31)
+                            else: traci.vehicle.setSpeedMode(vehicle_id, 32)
+                        else:
+                            desc = "({0}): Invalid speed_safety_checks value '{1}' (must be (str), not '{2}').".format(command, value, type(value).__name__)
+                            raise_error(TypeError, desc, self.curr_step)
+
+                    case "lc_safety_checks":
+                        if isinstance(value, bool):
+                            if value: traci.vehicle.setLaneChangeMode(vehicle_id, 1621)
+                            else: traci.vehicle.setSpeedMode(vehicle_id, 1617)
+                        else:
+                            desc = "({0}): Invalid speed_safety_checks value '{1}' (must be (str), not '{2}').".format(command, value, type(value).__name__)
+                            raise_error(TypeError, desc, self.curr_step)
+
+                    case _:
+                        desc = "Unrecognised command ('{0}').".format(command)
+                        raise_error(AttributeError, desc, self.curr_step)
+
+    def get_vehicle_ids(self, vehicle_types: str|list|tuple|None = None) -> list:
+        """
+        Return list of IDs for all vehicles currently in the simulation.
+        :return list: All current vehicle IDs
+        """
+
+        if vehicle_types == None:
+            return list(self._all_curr_vehicle_ids)
+        else:
+            if isinstance(vehicle_types, str): vehicle_types = [vehicle_types]
+            elif not isinstance(vehicle_types, (list, tuple)):
+                desc = "Invalid vehicle types value '{0}' (must be [str|(str)], not '{1}').".format(vehicle_types, type(vehicle_types).__name__)
+                raise_error(TypeError, desc, self.curr_step)
+            else:
+                for vehicle_type in vehicle_types:
+                    if not self.vehicle_type_exists(vehicle_type):
+                        desc = "Vehicle type ID '{0}' not found.".format(vehicle_type, type(vehicle_type).__name__)
                         raise_error(TypeError, desc, self.curr_step)
+            
+            vehicle_ids = []
+            for vehicle_id in list(self._all_curr_vehicle_ids):
+                if self.get_vehicle_vals(vehicle_id, "type") in vehicle_types: vehicle_ids.append(vehicle_id)
 
-                case _:
-                    desc = "Unrecognised command ('{0}').".format(command)
-                    raise_error(AttributeError, desc, self.curr_step)
+            return vehicle_ids
+        
+    def get_vehicle_types(self):
+        """
+        Return list of all valid vehicle type IDs.
+        :return list: All vehicle type IDs
+        """
+        return list(self._all_vehicle_types)
+    
+    def get_geometry_ids(self, geometry_types: str|list|tuple|None = None) -> list:
+        """
+        Return list of IDs for all edges and lanes in the network.
+        :param geometry_types: Geometry type ['EDGE'|'LANE'] or list of types
+        :return list:          All geometry types (of type)
+        """
+        valid_types = ["EDGE", "LANE"]
 
-    def get_vehicle_vals(self, vehicle_id: str, data_keys: str|list) -> dict|str|int|float|list:
+        if geometry_types == None: geometry_types = valid_types
+        elif isinstance(geometry_types, str): geometry_types = [geometry_types]
+        elif not isinstance(geometry_types, (list, tuple)):
+            desc = "Invalid geometry types value '{0}' (must be [str|(str)], not '{1}').".format(geometry_types, type(geometry_types).__name__)
+            raise_error(TypeError, desc, self.curr_step)
+
+        if len(set(geometry_types) - set(valid_types)) != 0:
+            desc = "Invalid geometry types (must be 'EDGE' and/or 'LANE')."
+            raise_error(ValueError, desc, self.curr_step)
+        else: geometry_types = [g_type.upper() for g_type in geometry_types]
+
+        geometry_ids = []
+        if "EDGE" in geometry_types:
+            geometry_ids += list(self._all_edges)
+        if "LANE" in geometry_types:
+            geometry_ids += list(self._all_lanes)
+        
+        return geometry_ids
+
+    def get_detector_ids(self, detector_types: str|list|tuple|None = None) -> list:
+        """
+        Return list of IDs for all edges and lanes in the network.
+        :param detector_types: Detector type ['multientryexit'|'inductionloop'] or list of types
+        :return list:          All detector IDs (of type)
+        """
+        valid_types = ["multientryexit", "inductionloop"]
+
+        if detector_types == None: detector_types = valid_types
+        elif isinstance(detector_types, str): detector_types = [detector_types]
+        elif not isinstance(detector_types, (list, tuple)):
+            desc = "Invalid route egdes value '{0}' (must be [str|(str)], not '{1}').".format(detector_types, type(detector_types).__name__)
+            raise_error(TypeError, desc, self.curr_step)
+            
+        if len(set(detector_types) - set(valid_types)) != 0:
+            desc = "Invalid detector types (must be 'multientryexit' and/or 'inductionloop')."
+            raise_error(ValueError, desc, self.curr_step)
+
+        detector_ids = []
+        for det_id, det_info in self.available_detectors.items():
+            if det_info["type"] in detector_types: detector_ids.append(det_id)
+        
+        return detector_ids
+
+    def get_vehicle_vals(self, vehicle_ids: list|tuple|str, data_keys: str|list) -> dict|str|int|float|list:
         """
         Get data values for specific vehicle using a list of data keys.
-        :param vehicle_id: Vehicle ID
-        :param data_keys: List of keys from [type|length|speed|is_stopped|max_speed|acceleration|position|altitude|heading|departure|lane_idx|origin|route_id|route_idx|route_edges], or single key
-        :return dict: Values by data_key (or single value)
+        :param vehicle_ids: Vehicle ID or list of IDs
+        :param data_keys:   List of keys from [type|length|speed|is_stopped|max_speed|acceleration|position|altitude|heading|departure|edge_id|lane_idx|origin|route_id|route_idx|route_edges], or single key
+        :return dict:       Values by data_key (or single value)
         """
 
-        if not self.vehicle_exists(vehicle_id):
-            desc = "Unrecognised vehicle ID given ('{0}').".format(vehicle_id)
-            raise_error(KeyError, desc, self.curr_step)
-
-        return_val = False
-        if isinstance(data_keys, str):
-            data_keys = [data_keys]
-            return_val = True
-        elif not isinstance(data_keys, (list, tuple)):
-            desc = "Invalid data_keys given '{0}' (must be [str|(str)], not '{1}').".format(data_keys, type(data_keys).__name__)
+        all_data_vals = {}
+        if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
+        elif not isinstance(vehicle_ids, (list, tuple)):
+            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
             raise_error(TypeError, desc, self.curr_step)
-        
-        data_vals, vehicle_known = {}, vehicle_id in self._known_vehicles.keys()
-        subscribed_data = traci.vehicle.getSubscriptionResults(vehicle_id)
-        for data_key in data_keys:
-            match data_key:
-                case "type":
-                    new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
-                    if not vehicle_known: self._known_vehicles[vehicle_id] = {}
-                    if new_request: self._known_vehicles[vehicle_id][data_key] = traci.vehicle.getTypeID(vehicle_id)
-                    data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
 
-                case "length":
-                    new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
-                    if not vehicle_known: self._known_vehicles[vehicle_id] = {}
-                    if new_request:
-                        length = traci.vehicle.getLength(vehicle_id)
-                        if self.units.name == 'IMPERIAL': length *= 3.28084
-                        self._known_vehicles[vehicle_id][data_key] = length
-                    data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
+        for vehicle_id in vehicle_ids:
+            if not self.vehicle_exists(vehicle_id):
+                desc = "Unrecognised vehicle ID given ('{0}').".format(vehicle_id)
+                raise_error(KeyError, desc, self.curr_step)
 
-                case "speed":
-                    if tc.VAR_SPEED in subscribed_data: speed = subscribed_data[tc.VAR_SPEED]
-                    else: speed = traci.vehicle.getSpeed(vehicle_id)
-                    if self.units.name in ['IMPERIAL', 'UK']: speed *= 2.2369362920544
-                    else: speed *= 3.6
-                    data_vals[data_key] = speed
+            return_val = False
+            if isinstance(data_keys, str):
+                data_keys = [data_keys]
+                return_val = True
+            elif isinstance(data_keys, (list, tuple)):
+                return_val = len(data_keys) == 1
+            else:
+                desc = "Invalid data_keys given '{0}' (must be [str|(str)], not '{1}').".format(data_keys, type(data_keys).__name__)
+                raise_error(TypeError, desc, self.curr_step)
+            
+            data_vals, vehicle_known = {}, vehicle_id in self._known_vehicles.keys()
+            if not vehicle_known: self._known_vehicles[vehicle_id] = {}
 
-                case "is_stopped":
-                    if tc.VAR_SPEED in subscribed_data: speed = subscribed_data[tc.VAR_SPEED]
-                    else: speed = traci.vehicle.getSpeed(vehicle_id)
-                    data_vals[data_key] = speed < 0.1
+            subscribed_data = traci.vehicle.getSubscriptionResults(vehicle_id)
+            for data_key in data_keys:
+                match data_key:
+                    case "type":
+                        new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
+                        if new_request: self._known_vehicles[vehicle_id][data_key] = traci.vehicle.getTypeID(vehicle_id)
+                        data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
 
-                case "max_speed":
-                    if tc.VAR_MAXSPEED in subscribed_data: max_speed = subscribed_data[tc.VAR_MAXSPEED]
-                    else: max_speed = traci.vehicle.getMaxSpeed(vehicle_id)
-                    if self.units.name in ['IMPERIAL', 'UK']: max_speed *= 2.2369362920544
-                    else: max_speed *= 3.6
-                    data_vals[data_key] = max_speed
+                    case "length":
+                        new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
+                        if new_request:
+                            length = traci.vehicle.getLength(vehicle_id)
+                            if self.units.name == 'IMPERIAL': length *= 3.28084
+                            self._known_vehicles[vehicle_id][data_key] = length
+                        data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
 
-                case "acceleration":
-                    if tc.VAR_ACCELERATION in subscribed_data: acceleration = subscribed_data[tc.VAR_ACCELERATION]
-                    else: acceleration = traci.vehicle.getAcceleration(vehicle_id)
-                    data_vals[data_key] = acceleration
+                    case "speed":
+                        if tc.VAR_SPEED in subscribed_data: speed = subscribed_data[tc.VAR_SPEED]
+                        else: speed = traci.vehicle.getSpeed(vehicle_id)
+                        if self.units.name in ['IMPERIAL', 'UK']: speed *= 2.2369362920544
+                        else: speed *= 3.6
+                        data_vals[data_key] = speed
 
-                case "position":
-                    if tc.VAR_POSITION in subscribed_data: position = list(subscribed_data[tc.VAR_POSITION])
-                    elif tc.VAR_POSITION3D in subscribed_data: position = list(subscribed_data[tc.VAR_POSITION3D])[:2]
-                    else: position = list(traci.vehicle.getPosition3D(vehicle_id))[:2]
-                    data_vals[data_key] = tuple(position)
+                    case "is_stopped":
+                        if tc.VAR_SPEED in subscribed_data: speed = subscribed_data[tc.VAR_SPEED]
+                        else: speed = traci.vehicle.getSpeed(vehicle_id)
+                        data_vals[data_key] = speed < 0.1
 
-                case "altitude":
-                    if tc.VAR_POSITION3D in subscribed_data: altitude = list(subscribed_data[tc.VAR_POSITION3D])[-1]
-                    else: altitude = list(traci.vehicle.getPosition3D(vehicle_id))[-1]
-                    data_vals[data_key] = altitude
+                    case "max_speed":
+                        if tc.VAR_MAXSPEED in subscribed_data: max_speed = subscribed_data[tc.VAR_MAXSPEED]
+                        else: max_speed = traci.vehicle.getMaxSpeed(vehicle_id)
+                        if self.units.name in ['IMPERIAL', 'UK']: max_speed *= 2.2369362920544
+                        else: max_speed *= 3.6
+                        data_vals[data_key] = max_speed
 
-                case "heading":
-                    if tc.VAR_ANGLE in subscribed_data: heading = subscribed_data[tc.VAR_ANGLE]
-                    else: heading = traci.vehicle.getAngle(vehicle_id)
-                    data_vals[data_key] = heading
+                    case "acceleration":
+                        if tc.VAR_ACCELERATION in subscribed_data: acceleration = subscribed_data[tc.VAR_ACCELERATION]
+                        else: acceleration = traci.vehicle.getAcceleration(vehicle_id)
+                        data_vals[data_key] = acceleration
 
-                case "departure":
-                    new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
-                    if not vehicle_known: self._known_vehicles[vehicle_id] = {}
-                    # Departure should be in steps (not seconds!) to avoid confusion when converting time units
-                    if new_request: self._known_vehicles[vehicle_id][data_key] = int(traci.vehicle.getDeparture(vehicle_id) / self.step_length)
-                    data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
+                    case "position":
+                        if tc.VAR_POSITION in subscribed_data: position = list(subscribed_data[tc.VAR_POSITION])
+                        elif tc.VAR_POSITION3D in subscribed_data: position = list(subscribed_data[tc.VAR_POSITION3D])[:2]
+                        else: position = list(traci.vehicle.getPosition3D(vehicle_id))[:2]
+                        data_vals[data_key] = tuple(position)
 
-                case "lane_idx":
-                    if tc.VAR_LANE_INDEX in subscribed_data: lane_idx = subscribed_data[tc.VAR_LANE_INDEX]
-                    else: lane_idx = traci.vehicle.getLaneIndex(vehicle_id)
-                    data_vals[data_key] = lane_idx
+                    case "altitude":
+                        if tc.VAR_POSITION3D in subscribed_data: altitude = list(subscribed_data[tc.VAR_POSITION3D])[-1]
+                        else: altitude = list(traci.vehicle.getPosition3D(vehicle_id))[-1]
+                        data_vals[data_key] = altitude
 
-                case "destination":
-                    if tc.VAR_ROUTE in subscribed_data: route = subscribed_data[tc.VAR_ROUTE]
-                    else: route = list(traci.vehicle.getRoute(vehicle_id))
-                    data_vals[data_key] = route[-1]
+                    case "heading":
+                        if tc.VAR_ANGLE in subscribed_data: heading = subscribed_data[tc.VAR_ANGLE]
+                        else: heading = traci.vehicle.getAngle(vehicle_id)
+                        data_vals[data_key] = heading
 
-                case "origin":
-                    new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
-                    if not vehicle_known: self._known_vehicles[vehicle_id] = {}
-                    if new_request: self._known_vehicles[vehicle_id][data_key] = list(traci.vehicle.getRoute(vehicle_id))[0]
-                    data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
+                    case "departure":
+                        new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
+                        if new_request: self._known_vehicles[vehicle_id][data_key] = int(traci.vehicle.getDeparture(vehicle_id) / self.step_length)
+                        data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
 
-                case "route_id":
-                    if tc.VAR_ROUTE_ID in subscribed_data: route_id = subscribed_data[tc.VAR_ROUTE_ID]
-                    else: route_id = traci.vehicle.getRouteID(vehicle_id)
-                    data_vals[data_key] = route_id
+                    case "edge_id":
+                        if tc.VAR_ROAD_ID in subscribed_data: edge_id = subscribed_data[tc.VAR_ROAD_ID]
+                        else: edge_id = traci.vehicle.getRoadID(vehicle_id)
+                        data_vals[data_key] = edge_id
 
-                case "route_idx":
-                    if tc.VAR_ROUTE_INDEX in subscribed_data: route_idx = subscribed_data[tc.VAR_ROUTE_INDEX]
-                    else: route_idx = list(traci.vehicle.getRouteIndex(vehicle_id))
-                    data_vals[data_key] = route_idx
+                    case "lane_idx":
+                        if tc.VAR_LANE_INDEX in subscribed_data: lane_idx = subscribed_data[tc.VAR_LANE_INDEX]
+                        else: lane_idx = traci.vehicle.getLaneIndex(vehicle_id)
+                        data_vals[data_key] = lane_idx
 
-                case "route_edges":
-                    if tc.VAR_ROUTE in subscribed_data: route = subscribed_data[tc.VAR_ROUTE]
-                    else: route = list(traci.vehicle.getRoute(vehicle_id))
-                    data_vals[data_key] = route
+                    case "destination":
+                        if tc.VAR_ROUTE in subscribed_data: route = subscribed_data[tc.VAR_ROUTE]
+                        else: route = list(traci.vehicle.getRoute(vehicle_id))
+                        data_vals[data_key] = route[-1]
 
-                case _:
-                    desc = "Unrecognised key ('{0}').".format(data_key)
-                    raise_error(KeyError, desc, self.curr_step)
+                    case "origin":
+                        new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
+                        if new_request: self._known_vehicles[vehicle_id][data_key] = list(traci.vehicle.getRoute(vehicle_id))[0]
+                        data_vals[data_key] = self._known_vehicles[vehicle_id][data_key]
 
-        if set(data_vals.keys()) != set(data_vals):
-            desc = "Invalid data_keys given (must be from accepted list)."
-            raise_error(ValueError, desc, self.curr_step)
-        if return_val: return list(data_vals.values())[0]
-        else: return data_vals
+                    case "route_id":
+                        if tc.VAR_ROUTE_ID in subscribed_data: route_id = subscribed_data[tc.VAR_ROUTE_ID]
+                        else: route_id = traci.vehicle.getRouteID(vehicle_id)
+                        data_vals[data_key] = route_id
+
+                    case "route_idx":
+                        if tc.VAR_ROUTE_INDEX in subscribed_data: route_idx = subscribed_data[tc.VAR_ROUTE_INDEX]
+                        else: route_idx = list(traci.vehicle.getRouteIndex(vehicle_id))
+                        data_vals[data_key] = route_idx
+
+                    case "route_edges":
+                        if tc.VAR_ROUTE in subscribed_data: route = subscribed_data[tc.VAR_ROUTE]
+                        else: route = list(traci.vehicle.getRoute(vehicle_id))
+                        data_vals[data_key] = route
+
+                    case _:
+                        desc = "Unrecognised key ('{0}').".format(data_key)
+                        raise_error(KeyError, desc, self.curr_step)
+
+            if len(vehicle_ids) == 1:
+                if set(data_vals.keys()) != set(data_vals):
+                    desc = "Invalid data_keys given (must be from accepted list)."
+                    raise_error(ValueError, desc, self.curr_step)
+                if return_val: return list(data_vals.values())[0]
+                else: return data_vals
+            else:
+                if return_val: all_data_vals[vehicle_id] = list(data_vals.values())[0]
+                else: all_data_vals[vehicle_id] = data_vals
+
+        return all_data_vals
     
-    def get_vehicle_data(self, vehicle_id: str) -> dict:
+    def get_vehicle_data(self, vehicle_ids: str) -> dict:
         """
         Get data for specified vehicle, updating _known_vehicles dict.
-        :param vehicle_id: Vehicle ID
-        :return dict: Vehicle data dictionary, returns None if does not exist in simulation
+        :param vehicle_ids: Vehicle ID or list of IDs
+        :return dict:       Vehicle data dictionary, returns None if does not exist in simulation
         """
 
-        if not self.vehicle_exists(vehicle_id):
-            desc = "Unrecognised vehicle ID found ('{0}').".format(vehicle_id)
-            raise_error(KeyError, desc, self.curr_step)
-        
-        static_data_keys = ("type", "length", "departure", "origin")
-        dynamic_data_keys = ("speed", "acceleration", "is_stopped", "position", "altitude", "heading", "destination")
-        vehicle_data = self.get_vehicle_vals(vehicle_id, dynamic_data_keys)
+        all_vehicle_data = {}
+        if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
+        elif not isinstance(vehicle_ids, (list, tuple)):
+            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
+            raise_error(TypeError, desc, self.curr_step)
 
-        if vehicle_id not in self._known_vehicles.keys(): new_vehicle = True
-        elif len(set(static_data_keys) - set(self._known_vehicles[vehicle_id].keys())) > 0: new_vehicle = True
-        else: new_vehicle = False
+        for vehicle_id in vehicle_ids:
+            if not self.vehicle_exists(vehicle_id):
+                desc = "Unrecognised vehicle ID found ('{0}').".format(vehicle_id)
+                raise_error(KeyError, desc, self.curr_step)
+            
+            static_data_keys = ("type", "length", "departure", "origin")
+            dynamic_data_keys = ("speed", "acceleration", "is_stopped", "position", "altitude", "heading", "destination")
+            vehicle_data = self.get_vehicle_vals(vehicle_id, dynamic_data_keys)
 
-        if new_vehicle:
-            static_veh_data = self.get_vehicle_vals(vehicle_id, static_data_keys)
+            if vehicle_id not in self._known_vehicles.keys(): new_vehicle = True
+            elif len(set(static_data_keys) - set(self._known_vehicles[vehicle_id].keys())) > 0: new_vehicle = True
+            else: new_vehicle = False
 
-            self._known_vehicles[vehicle_id] = {"type":        static_veh_data["type"],
-                                               "longitude":    vehicle_data["position"][0],
-                                               "latitude":     vehicle_data["position"][1],
-                                               "speed":        vehicle_data["speed"],
-                                               "acceleration": vehicle_data["acceleration"],
-                                               "stopped":      vehicle_data["is_stopped"],
-                                               "length":       static_veh_data["length"],
-                                               "heading":      vehicle_data["heading"],
-                                               "departure":    static_veh_data["departure"],
-                                               "altitude":     vehicle_data["altitude"],
-                                               "destination":  vehicle_data["destination"],
-                                               "origin":       static_veh_data["origin"],
-                                               "last_seen":    self.curr_step
-                                              }
-        else:
-            self._known_vehicles[vehicle_id]["speed"]        = vehicle_data["speed"]
-            self._known_vehicles[vehicle_id]["acceleration"] = vehicle_data["acceleration"]
-            self._known_vehicles[vehicle_id]["stopped"]      = vehicle_data["is_stopped"]
-            self._known_vehicles[vehicle_id]["longitude"]    = vehicle_data["position"][0]
-            self._known_vehicles[vehicle_id]["latitude"]     = vehicle_data["position"][1]
-            self._known_vehicles[vehicle_id]["heading"]      = vehicle_data["heading"]
-            self._known_vehicles[vehicle_id]["altitude"]     = vehicle_data["altitude"]
-            self._known_vehicles[vehicle_id]["destination"]  = vehicle_data["destination"]
-            self._known_vehicles[vehicle_id]["last_seen"]    = self.curr_step
+            if new_vehicle:
+                static_veh_data = self.get_vehicle_vals(vehicle_id, static_data_keys)
 
-        vehicle_data = copy(self._known_vehicles[vehicle_id])
-        del vehicle_data['last_seen']
+                self._known_vehicles[vehicle_id] = {"type":        static_veh_data["type"],
+                                                    "longitude":    vehicle_data["position"][0],
+                                                    "latitude":     vehicle_data["position"][1],
+                                                    "speed":        vehicle_data["speed"],
+                                                    "acceleration": vehicle_data["acceleration"],
+                                                    "stopped":      vehicle_data["is_stopped"],
+                                                    "length":       static_veh_data["length"],
+                                                    "heading":      vehicle_data["heading"],
+                                                    "departure":    static_veh_data["departure"],
+                                                    "altitude":     vehicle_data["altitude"],
+                                                    "destination":  vehicle_data["destination"],
+                                                    "origin":       static_veh_data["origin"],
+                                                    "last_seen":    self.curr_step
+                                                   }
+            else:
+                self._known_vehicles[vehicle_id]["speed"]        = vehicle_data["speed"]
+                self._known_vehicles[vehicle_id]["acceleration"] = vehicle_data["acceleration"]
+                self._known_vehicles[vehicle_id]["stopped"]      = vehicle_data["is_stopped"]
+                self._known_vehicles[vehicle_id]["longitude"]    = vehicle_data["position"][0]
+                self._known_vehicles[vehicle_id]["latitude"]     = vehicle_data["position"][1]
+                self._known_vehicles[vehicle_id]["heading"]      = vehicle_data["heading"]
+                self._known_vehicles[vehicle_id]["altitude"]     = vehicle_data["altitude"]
+                self._known_vehicles[vehicle_id]["destination"]  = vehicle_data["destination"]
+                self._known_vehicles[vehicle_id]["last_seen"]    = self.curr_step
 
-        return vehicle_data
+            vehicle_data = copy(self._known_vehicles[vehicle_id])
+            del vehicle_data['last_seen']
+
+            if len(vehicle_ids) == 1:
+                return vehicle_data
+            else:
+                all_vehicle_data[vehicle_id] = vehicle_data
+
+        return all_vehicle_data
 
     def get_all_vehicle_data(self, types: list = None) -> dict:
         """
@@ -1466,224 +1865,255 @@ class Simulation:
 
         return total_vehicle_data, all_vehicle_data
     
-    def get_geometry_vals(self, geometry_id: str|int, data_keys: str|list) -> dict|str|int|float|list:
+    def get_geometry_vals(self, geometry_ids: str|int, data_keys: str|list) -> dict|str|int|float|list:
         """
         Get data values for specific edge or lane using a list of data keys, from: (edge or lane) vehicle_count, vehicle_ids, vehicle_speed,
         halting_no, vehicle_occupancy, tt (travel time), emissions, max_speed (avg of lane speeds) | (edge only) street_name,
         n_lanes, lane_ids | (lane only) edge_id, n_links, permissions
-        :param edge_id: Either lane or edge ID
-        :param data_keys: List of keys or single key
-        :return dict: Values by data_key (or single value)
+        :param geometry_ids: Either edge or lane ID or list of edge or lane IDs
+        :param data_keys:    List of keys or single key
+        :return dict:        Values by data_key (or single value)
         """
-        
-        g_name = self.geometry_exists(geometry_id)
-        if g_name == "EDGE": g_class = traci.edge
-        elif g_name == "LANE": g_class = traci.lane
-        else:
-            desc = "Geometry ID '{0}' not found.".format(geometry_id)
-            raise_error(KeyError, desc, self.curr_step)
-
-        return_val = False
-        if isinstance(data_keys, str):
-            data_keys = [data_keys]
-            return_val = True
-        elif not isinstance(data_keys, (list, tuple)):
-            desc = "Invalid data_keys given '{0}' (must be [str|(str)], not '{1}').".format(data_keys, type(data_keys).__name__)
+        all_data_vals = {}
+        if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
+        elif not isinstance(geometry_ids, (list, tuple)):
+            desc = "Invalid geometry_ids given '{0}' (must be [str|(str)], not '{1}').".format(geometry_ids, type(geometry_ids).__name__)
             raise_error(TypeError, desc, self.curr_step)
-        
-        data_vals, subscribed_data = {}, g_class.getSubscriptionResults(geometry_id)
-        for data_key in data_keys:
-            match data_key:
-                case "vehicle_count":
-                    if tc.LAST_STEP_VEHICLE_ID_LIST in subscribed_data: vehicle_count = len(list(subscribed_data[tc.LAST_STEP_VEHICLE_ID_LIST]))
-                    elif tc.LAST_STEP_VEHICLE_NUMBER in subscribed_data: vehicle_count = subscribed_data[tc.LAST_STEP_VEHICLE_NUMBER]
-                    else: vehicle_count = g_class.getLastStepVehicleNumber(geometry_id)
-                    data_vals[data_key] = vehicle_count
-                    continue
 
-                case "vehicle_ids":
-                    if tc.LAST_STEP_VEHICLE_ID_LIST in subscribed_data: vehicle_ids = list(subscribed_data[tc.LAST_STEP_VEHICLE_ID_LIST])
-                    else: vehicle_ids = g_class.getLastStepVehicleIDs(geometry_id)
-                    data_vals[data_key] = list(vehicle_ids)
-                    continue
+        for geometry_id in geometry_ids:
+            g_name = self.geometry_exists(geometry_id)
+            if g_name == "EDGE": g_class = traci.edge
+            elif g_name == "LANE": g_class = traci.lane
+            else:
+                desc = "Geometry ID '{0}' not found.".format(geometry_id)
+                raise_error(KeyError, desc, self.curr_step)
 
-                case "vehicle_speed":
-                    if tc.LAST_STEP_MEAN_SPEED in subscribed_data: vehicle_speed = subscribed_data[tc.LAST_STEP_MEAN_SPEED]
-                    else: vehicle_speed = g_class.getLastStepMeanSpeed(geometry_id)
+            return_val = False
+            if isinstance(data_keys, str):
+                data_keys = [data_keys]
+                return_val = True
+            elif isinstance(data_keys, (list, tuple)):
+                return_val = len(data_keys) == 1
+            else:
+                desc = "Invalid data_keys given '{0}' (must be [str|(str)], not '{1}').".format(data_keys, type(data_keys).__name__)
+                raise_error(TypeError, desc, self.curr_step)
+            
+            data_vals, subscribed_data = {}, g_class.getSubscriptionResults(geometry_id)
+            for data_key in data_keys:
+                match data_key:
+                    case "vehicle_count":
+                        if tc.LAST_STEP_VEHICLE_ID_LIST in subscribed_data: vehicle_count = len(list(subscribed_data[tc.LAST_STEP_VEHICLE_ID_LIST]))
+                        elif tc.LAST_STEP_VEHICLE_NUMBER in subscribed_data: vehicle_count = subscribed_data[tc.LAST_STEP_VEHICLE_NUMBER]
+                        else: vehicle_count = g_class.getLastStepVehicleNumber(geometry_id)
+                        data_vals[data_key] = vehicle_count
+                        continue
 
-                    if self.units.name in ['IMPERIAL', 'UK']: data_vals[data_key] = vehicle_speed * 2.2369362920544
-                    else: data_vals[data_key] = vehicle_speed * 3.6
-                    continue
-                
-                case "halting_no":
-                    if tc.LAST_STEP_VEHICLE_HALTING_NUMBER in subscribed_data: halting_no = subscribed_data[tc.LAST_STEP_VEHICLE_HALTING_NUMBER]
-                    else: halting_no = g_class.getLastStepHaltingNumber(geometry_id)
-                    data_vals[data_key] = halting_no
-                    continue 
+                    case "vehicle_ids":
+                        if tc.LAST_STEP_VEHICLE_ID_LIST in subscribed_data: vehicle_ids = list(subscribed_data[tc.LAST_STEP_VEHICLE_ID_LIST])
+                        else: vehicle_ids = g_class.getLastStepVehicleIDs(geometry_id)
+                        data_vals[data_key] = list(vehicle_ids)
+                        continue
 
-                case "vehicle_occupancy":
-                    if tc.LAST_STEP_OCCUPANCY in subscribed_data: vehicle_occupancy = subscribed_data[tc.LAST_STEP_OCCUPANCY]
-                    else: vehicle_occupancy = g_class.getLastStepOccupancy(geometry_id)
-                    data_vals[data_key] = vehicle_occupancy
-                    continue
+                    case "vehicle_speed":
+                        if tc.LAST_STEP_MEAN_SPEED in subscribed_data: vehicle_speed = subscribed_data[tc.LAST_STEP_MEAN_SPEED]
+                        else: vehicle_speed = g_class.getLastStepMeanSpeed(geometry_id)
 
-                case "tt":
-                    data_vals[data_key] = g_class.getTraveltime(geometry_id)
-                    continue
-
-                case "emissions":
-                    data_vals[data_key] = ({"CO2": g_class.getCO2Emission(geometry_id), "CO": g_class.getCO2Emission(geometry_id), "HC": g_class.getHCEmission(geometry_id),
-                                            "PMx": g_class.getPMxEmission(geometry_id), "NOx": g_class.getNOxEmission(geometry_id)})
-                    continue
+                        if self.units.name in ['IMPERIAL', 'UK']: data_vals[data_key] = vehicle_speed * 2.2369362920544
+                        else: data_vals[data_key] = vehicle_speed * 3.6
+                        continue
                     
-            if g_name == "EDGE":
-                match data_key:
-                    case "street_name":
-                        data_vals[data_key] = g_class.getStreetName(geometry_id)
-                    case "n_lanes":
-                        data_vals[data_key] = g_class.getLaneNumber(geometry_id)
-                    case "lane_ids":
-                        n_lanes = g_class.getLaneNumber(geometry_id)
-                        data_vals[data_key] = ["{0}_{1}".format(geometry_id, idx) for idx in range(n_lanes)]
-                    case "max_speed":
-                        n_lanes = g_class.getLaneNumber(geometry_id)
-                        lane_ids = ["{0}_{1}".format(geometry_id, idx) for idx in range(n_lanes)]
-                        avg_lane_speed = sum([traci.lane.getMaxSpeed(lane_id) for lane_id in lane_ids])/len(lane_ids)
+                    case "halting_no":
+                        if tc.LAST_STEP_VEHICLE_HALTING_NUMBER in subscribed_data: halting_no = subscribed_data[tc.LAST_STEP_VEHICLE_HALTING_NUMBER]
+                        else: halting_no = g_class.getLastStepHaltingNumber(geometry_id)
+                        data_vals[data_key] = halting_no
+                        continue 
 
-                        if self.units.name in ['IMPERIAL', 'UK']: data_vals[data_key] = avg_lane_speed * 2.2369362920544
-                        else: data_vals[data_key] = avg_lane_speed * 3.6
-                    case _:
-                        desc = "Unrecognised key ('{0}').".format(data_key)
-                        raise_error(ValueError, desc, self.curr_step)
-            elif g_name == "LANE":
-                match data_key:
-                    case "edge_id":
-                        data_vals[data_key] = g_class.getEdgeID(geometry_id)
-                    case "n_links":
-                        data_vals[data_key] = g_class.getLinkNumber(geometry_id)
-                    case "allowed":
-                        data_vals[data_key] = g_class.getAllowed(geometry_id)
-                    case "disallowed":
-                        data_vals[data_key] = g_class.getDisallowed(geometry_id)
-                    case "left_lc":
-                        data_vals[data_key] = g_class.getChangePermissions(geometry_id, 0)
-                    case "right_lc":
-                        data_vals[data_key] = g_class.getChangePermissions(geometry_id, 1)
-                    case "max_speed":
-                        if self.units.name in ['IMPERIAL', 'UK']: data_vals[data_key] = g_class.getMaxSpeed(geometry_id) * 2.2369362920544
-                        else: data_vals[data_key] = g_class.getMaxSpeed(geometry_id) * 3.6
-                    case _:
-                        desc = "Unrecognised key ('{0}').".format(data_key)
-                        raise_error(ValueError, desc, self.curr_step)
-        
-        if set(data_vals.keys()) != set(data_vals):
-            desc = "Invalid data_keys given (must be from accepted list)."
-            raise_error(ValueError, desc, self.curr_step)
-        if return_val: return list(data_vals.values())[0]
-        else: return data_vals
+                    case "vehicle_occupancy":
+                        if tc.LAST_STEP_OCCUPANCY in subscribed_data: vehicle_occupancy = subscribed_data[tc.LAST_STEP_OCCUPANCY]
+                        else: vehicle_occupancy = g_class.getLastStepOccupancy(geometry_id)
+                        data_vals[data_key] = vehicle_occupancy
+                        continue
 
-    def set_geometry_vals(self, geometry_id: str|int, **kwargs) -> None:
+                    case "tt":
+                        data_vals[data_key] = g_class.getTraveltime(geometry_id)
+                        continue
+
+                    case "emissions":
+                        data_vals[data_key] = ({"CO2": g_class.getCO2Emission(geometry_id), "CO": g_class.getCO2Emission(geometry_id), "HC": g_class.getHCEmission(geometry_id),
+                                                "PMx": g_class.getPMxEmission(geometry_id), "NOx": g_class.getNOxEmission(geometry_id)})
+                        continue
+                        
+                if g_name == "EDGE":
+                    match data_key:
+                        case "connected_edges":
+                            net_file = traci.simulation.getOption("net-file")
+                            net = sumolib.net.readNet(net_file)
+
+                            data_vals[data_key] = {'incoming': [e.getID() for e in net.getEdge(geometry_id).getIncoming()],
+                                                   'outgoing': [e.getID() for e in net.getEdge(geometry_id).getOutgoing()]}
+
+                        case "street_name":
+                            data_vals[data_key] = g_class.getStreetName(geometry_id)
+                        case "n_lanes":
+                            data_vals[data_key] = g_class.getLaneNumber(geometry_id)
+                        case "lane_ids":
+                            n_lanes = g_class.getLaneNumber(geometry_id)
+                            data_vals[data_key] = ["{0}_{1}".format(geometry_id, idx) for idx in range(n_lanes)]
+                        case "max_speed":
+                            n_lanes = g_class.getLaneNumber(geometry_id)
+                            lane_ids = ["{0}_{1}".format(geometry_id, idx) for idx in range(n_lanes)]
+                            avg_lane_speed = sum([traci.lane.getMaxSpeed(lane_id) for lane_id in lane_ids])/len(lane_ids)
+
+                            if self.units.name in ['IMPERIAL', 'UK']: data_vals[data_key] = avg_lane_speed * 2.2369362920544
+                            else: data_vals[data_key] = avg_lane_speed * 3.6
+                        case _:
+                            desc = "Unrecognised key ('{0}').".format(data_key)
+                            raise_error(ValueError, desc, self.curr_step)
+                elif g_name == "LANE":
+                    match data_key:
+                        case "edge_id":
+                            data_vals[data_key] = g_class.getEdgeID(geometry_id)
+                        case "n_links":
+                            data_vals[data_key] = g_class.getLinkNumber(geometry_id)
+                        case "allowed":
+                            data_vals[data_key] = g_class.getAllowed(geometry_id)
+                        case "disallowed":
+                            data_vals[data_key] = g_class.getDisallowed(geometry_id)
+                        case "left_lc":
+                            data_vals[data_key] = g_class.getChangePermissions(geometry_id, 0)
+                        case "right_lc":
+                            data_vals[data_key] = g_class.getChangePermissions(geometry_id, 1)
+                        case "max_speed":
+                            if self.units.name in ['IMPERIAL', 'UK']: data_vals[data_key] = g_class.getMaxSpeed(geometry_id) * 2.2369362920544
+                            else: data_vals[data_key] = g_class.getMaxSpeed(geometry_id) * 3.6
+                        case _:
+                            desc = "Unrecognised key ('{0}').".format(data_key)
+                            raise_error(ValueError, desc, self.curr_step)
+
+            if len(geometry_ids) == 1:
+                if set(data_vals.keys()) != set(data_vals):
+                    desc = "Invalid data_keys given (must be from accepted list)."
+                    raise_error(ValueError, desc, self.curr_step)
+                if return_val: return list(data_vals.values())[0]
+                else: return data_vals
+            else:
+                if return_val: all_data_vals[geometry_id] = list(data_vals.values())[0]
+                else: all_data_vals[geometry_id] = data_vals
+
+        return all_data_vals
+
+    def set_geometry_vals(self, geometry_ids: str|int, **kwargs) -> None:
         """
         Calls the TraCI API to change a edge or lane's state.
-        :param geometry_id: Edge or lane ID
-        :param max_speed: Set new max speed value [int|float]
-        :param allowed: Set allowed vehicle types [(str)], empty list allows all (lane only)
-        :param disallowed: Set disallowed vehicle types [(str)] (lane only)
-        :param left_lc: Set left lane changing vehicle permission with by vtype list [(str)] (lane only)
-        :param right_lc: Set right lane changing vehicle permission with by vtype list [(str)] (lane only)
+        :param geometry_ids: Edge or lane ID or list of edge or lane IDs
+        :param max_speed:    Set new max speed value [int|float]
+        :param allowed:      Set allowed vehicle types [(str)], empty list allows all (lane only)
+        :param disallowed:   Set disallowed vehicle types [(str)] (lane only)
+        :param left_lc:      Set left lane changing vehicle permission with by vehicle_type list [(str)] (lane only)
+        :param right_lc:     Set right lane changing vehicle permission with by vehicle_type list [(str)] (lane only)
         """
         
-        if geometry_id in self._all_edges:   g_class, g_name = traci.edge, "EDGE"
-        elif geometry_id in self._all_lanes: g_class, g_name = traci.lane, "LANE"
-        else:
-            desc = "Unrecognised egde or lane ID given ('{0}').".format(geometry_id)
-            raise_error(KeyError, desc, self.curr_step)
-        
-        for command, value in kwargs.items():
-            match command:
-                case "max_speed":
-                    if isinstance(value, (int, float)): 
-                        if self.units.name in ['IMPERIAL', 'UK']: g_class.setMaxSpeed(geometry_id, value / 2.2369362920544)
-                        else: g_class.setMaxSpeed(geometry_id, value / 3.6)
-                    else:
-                        desc = "({0}): Invalid speed value '{1}' (must be [int|float], not '{2}').".format(command, value, type(value).__name__)
-                        raise_error(TypeError, desc, self.curr_step)
+        if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
+        elif not isinstance(geometry_ids, (list, tuple)):
+            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(geometry_ids, type(geometry_ids).__name__)
+            raise_error(TypeError, desc, self.curr_step)
 
-                case "allowed":
-                    if g_name != "LANE":
-                        desc = "({0}): Command is only valid for lanes.".format(command)
-                        raise_error(ValueError, desc, self.curr_step)
-                    if isinstance(value, (list, tuple)):
-                        curr_allowed = list(g_class.getAllowed(geometry_id))
-                        allowed = tuple(set(curr_allowed + list(value)))
-                        g_class.setAllowed(geometry_id, allowed)
-                        
-                        curr_disallowed = list(g_class.getDisallowed(geometry_id))
-                        disallowed = tuple(set(curr_disallowed) - set(value))
-                        g_class.setDisallowed(geometry_id, disallowed)
-                    else:
-                        desc = "({0}): Invalid type list value '{1}' (must be [str], not '{2}').".format(command, value, type(value).__name__)
-                        raise_error(TypeError, desc, self.curr_step)
+        for geometry_id in geometry_ids:
+            if geometry_id in self._all_edges:   g_class, g_name = traci.edge, "EDGE"
+            elif geometry_id in self._all_lanes: g_class, g_name = traci.lane, "LANE"
+            else:
+                desc = "Unrecognised egde or lane ID given ('{0}').".format(geometry_id)
+                raise_error(KeyError, desc, self.curr_step)
+            
+            for command, value in kwargs.items():
+                match command:
+                    case "max_speed":
+                        if isinstance(value, (int, float)): 
+                            if value >= 0.1:
+                                if self.units.name in ['IMPERIAL', 'UK']: g_class.setMaxSpeed(geometry_id, value / 2.2369362920544)
+                                else: g_class.setMaxSpeed(geometry_id, value / 3.6)
+                            else:
+                                unit = "km/h" if self.units.name == "METRIC" else "mph"
+                                desc = "({0}): Invalid speed value '{1}' (must be >= 0.1{2}).".format(command, value, unit)
+                                raise_error(ValueError, desc, self.curr_step)
+                        else:
+                            desc = "({0}): Invalid max_speed value '{1}' (must be [int|float], not '{2}').".format(command, value, type(value).__name__)
+                            raise_error(TypeError, desc, self.curr_step)
+                    case "allowed":
+                        if g_name != "LANE":
+                            desc = "({0}): Command is only valid for lanes.".format(command)
+                            raise_error(ValueError, desc, self.curr_step)
+                        if isinstance(value, (list, tuple)):
+                            curr_allowed = list(g_class.getAllowed(geometry_id))
+                            allowed = tuple(set(curr_allowed + list(value)))
+                            g_class.setAllowed(geometry_id, allowed)
+                            
+                            curr_disallowed = list(g_class.getDisallowed(geometry_id))
+                            disallowed = tuple(set(curr_disallowed) - set(value))
+                            g_class.setDisallowed(geometry_id, disallowed)
+                        else:
+                            desc = "({0}): Invalid allowed value '{1}' (must be [str], not '{2}').".format(command, value, type(value).__name__)
+                            raise_error(TypeError, desc, self.curr_step)
 
-                case "disallowed":
-                    if g_name != "LANE":
-                        desc = "({0}): Command is only valid for lanes.".format(command)
-                        raise_error(ValueError, desc, self.curr_step)
-                    if isinstance(value, (list, tuple)):
-                        curr_disallowed = list(g_class.getDisallowed(geometry_id))
-                        disallowed = tuple(set(curr_disallowed + list(value)))
-                        g_class.setDisallowed(geometry_id, disallowed)
-                        
-                        curr_allowed = list(g_class.getAllowed(geometry_id))
-                        allowed = tuple(set(curr_allowed) - set(value))
-                        g_class.setAllowed(geometry_id, allowed)
-                    else:
-                        desc = "({0}): Invalid type list value '{1}' (must be [str], not '{2}').".format(command, value, type(value).__name__)
-                        raise_error(TypeError, desc, self.curr_step)
+                    case "disallowed":
+                        if g_name != "LANE":
+                            desc = "({0}): Command is only valid for lanes.".format(command)
+                            raise_error(ValueError, desc, self.curr_step)
+                        if isinstance(value, (list, tuple)):
+                            curr_disallowed = list(g_class.getDisallowed(geometry_id))
+                            disallowed = tuple(set(curr_disallowed + list(value)))
+                            g_class.setDisallowed(geometry_id, disallowed)
+                            
+                            curr_allowed = list(g_class.getAllowed(geometry_id))
+                            allowed = tuple(set(curr_allowed) - set(value))
+                            g_class.setAllowed(geometry_id, allowed)
+                        else:
+                            desc = "({0}): Invalid disallowed value '{1}' (must be [str], not '{2}').".format(command, value, type(value).__name__)
+                            raise_error(TypeError, desc, self.curr_step)
 
-                case "left_lc":
-                    if g_name != "LANE":
-                        desc = "({0}): Command is only valid for lanes.".format(command)
-                        raise_error(ValueError, desc, self.curr_step)
-                    if isinstance(value, (list, tuple)):
-                        g_class.setChangePermissions(geometry_id, value[0], 1)
-                    else:
-                        desc = "({0}): Invalid type list value '{1}' (must be [str], not '{2}').".format(command, value, type(value).__name__)
-                        raise_error(TypeError, desc, self.curr_step)
+                    case "left_lc":
+                        if g_name != "LANE":
+                            desc = "({0}): Command is only valid for lanes.".format(command)
+                            raise_error(ValueError, desc, self.curr_step)
+                        if isinstance(value, (list, tuple)):
+                            g_class.setChangePermissions(geometry_id, value[0], 1)
+                        else:
+                            desc = "({0}): Invalid left_lc value '{1}' (must be [str], not '{2}').".format(command, value, type(value).__name__)
+                            raise_error(TypeError, desc, self.curr_step)
+                    
+                    case "right_lc":
+                        if g_name != "LANE":
+                            desc = "({0}): Command is only valid for lanes.".format(command)
+                            raise_error(ValueError, desc, self.curr_step)
+                        if isinstance(value, (list, tuple)):
+                            g_class.setChangePermissions(geometry_id, value[0], -1)
+                        else:
+                            desc = "({0}): Invalid right_lc value '{1}' (must be [str], not '{2}').".format(command, value, type(value).__name__)
+                            raise_error(TypeError, desc, self.curr_step)
+
+                    case _:
+                        desc = "Unrecognised command ('{0}').".format(command)
+                        raise_error(AttributeError, desc, self.curr_step)
                 
-                case "right_lc":
-                    if g_name != "LANE":
-                        desc = "({0}): Command is only valid for lanes.".format(command)
-                        raise_error(ValueError, desc, self.curr_step)
-                    if isinstance(value, (list, tuple)):
-                        g_class.setChangePermissions(geometry_id, value[0], -1)
-                    else:
-                        desc = "({0}): Invalid type list value '{1}' (must be [str], not '{2}').".format(command, value, type(value).__name__)
-                        raise_error(TypeError, desc, self.curr_step)
-
-                case _:
-                    desc = "Unrecognised command ('{0}').".format(command)
-                    raise_error(AttributeError, desc, self.curr_step)
-                
-    def get_last_step_geometry_vehicles(self, geometry_ids: str|list, v_types: list|None = None, flatten: bool = False) -> dict|list:
+    def get_last_step_geometry_vehicles(self, geometry_ids: str|list, vehicle_types: list|None = None, flatten: bool = False) -> dict|list:
         """
         Get the IDs of vehicles on a lane or egde, by geometry ID.
-        :param geometry_ids: Lane or edge ID or list of lane or edge IDs
-        :param v_types: Included vehicle types
-        :param flatten: If true, all IDs are returned in a 1D array, else a dict with vehicles for each lane or edge
-        :return dict|list: Dict or list containing all vehicle IDs
+        :param geometry_ids:  Lane or edge ID or list of lane or edge IDs
+        :param vehicle_types: Included vehicle types
+        :param flatten:       If true, all IDs are returned in a 1D array, else a dict with vehicles for each lane or edge
+        :return dict|list:    Dict or list containing all vehicle IDs
         """
 
         geometry_ids = [geometry_ids] if not isinstance(geometry_ids, list) else geometry_ids
         if len(geometry_ids) == 1: flatten = True
-        v_types = [v_types] if v_types != None and not isinstance(v_types, list) else v_types
+        vehicle_types = [vehicle_types] if vehicle_types != None and not isinstance(vehicle_types, list) else vehicle_types
 
         vehicle_ids = [] if flatten else {}
         for geometry_id in geometry_ids:
 
             g_vehicle_ids = self.get_geometry_vals(geometry_id, "vehicle_ids")
-            if v_types != None:
-                g_vehicle_ids = [vehicle_id for vehicle_id in g_vehicle_ids if self.get_vehicle_vals(vehicle_id, "type") in v_types]
+            if vehicle_types != None:
+                g_vehicle_ids = [vehicle_id for vehicle_id in g_vehicle_ids if self.get_vehicle_vals(vehicle_id, "type") in vehicle_types]
 
             if flatten: vehicle_ids += g_vehicle_ids
             else: vehicle_ids[geometry_id] = g_vehicle_ids
@@ -1698,6 +2128,9 @@ class Simulation:
         :param geometry_id: Lane or edge ID
         :return str|None:   Geometry type, or None if it does not exist.
         """
+        if not isinstance(geometry_id, str):
+            desc = "Invalid geometry_id given '{0}' (must be 'str', not '{1}').".format(geometry_id, type(geometry_id).__name__)
+            raise_error(TypeError, desc, self.curr_step)
 
         if geometry_id in self._all_edges: return "EDGE"
         elif geometry_id in self._all_lanes: return "LANE"
@@ -1709,6 +2142,9 @@ class Simulation:
         :param detector_id: Detector ID
         :return str|None:   Detector type, or None if it does not exist.
         """
+        if not isinstance(detector_id, str):
+            desc = "Invalid detector_id given '{0}' (must be 'str', not '{1}').".format(detector_id, type(detector_id).__name__)
+            raise_error(TypeError, desc, self.curr_step)
 
         if detector_id in self.available_detectors.keys():
             return self.available_detectors[detector_id]["type"]
@@ -1720,19 +2156,25 @@ class Simulation:
         :param route_id:  Route ID
         :return str|None: List of route edges, or None if it does not exist.
         """
+        if not isinstance(route_id, str):
+            desc = "Invalid route_id given '{0}' (must be 'str', not '{1}').".format(route_id, type(route_id).__name__)
+            raise_error(TypeError, desc, self.curr_step)
 
         if route_id in self._all_routes.keys():
             return self._all_routes[route_id]
         else: return None
 
-    def vtype_exists(self, vtype: str) -> bool:
+    def vehicle_type_exists(self, vehicle_type: str) -> bool:
         """
-        Get whether vtype exists.
-        :param vtype: Vehicle type ID
-        :return bool: Denotes whether vehicle type exists
+        Get whether vehicle_type exists.
+        :param vehicle_type: Vehicle type ID
+        :return bool:        Denotes whether vehicle type exists
         """
+        if not isinstance(vehicle_type, str):
+            desc = "Invalid vehicle_type given '{0}' (must be 'str', not '{1}').".format(vehicle_type, type(vehicle_type).__name__)
+            raise_error(TypeError, desc, self.curr_step)
 
-        return vtype in list(traci.vehicletype.getIDList())
+        return vehicle_type in list(self._all_vehicle_types)
 
     def print_summary(self, save_file=None) -> None:
         """
@@ -1744,7 +2186,7 @@ class Simulation:
         """
         print_summary(self.all_data, save_file)
 
-    def print_sim_data(self) -> None:
+    def print_sim_data_struct(self) -> None:
         """
         Prints the structure of the current sim_data dictionary, with keys
         and data types for values. Lists/tuples are displayed at max 2D. '*'
@@ -1752,9 +2194,9 @@ class Simulation:
         and '+' denotes the array dimension is greater than 2.
         """
         
-        print_sim_data(self.all_data)
+        print_sim_data_struct(self.all_data)
 
-def print_sim_data(sim_data: Simulation|dict|str) -> None:
+def print_sim_data_struct(sim_data: Simulation|dict|str) -> None:
     """
     Prints the structure of a sim_data dictionary, from a Simulation
     object, dict or filepath, with keys and data types for values. Lists/tuples
@@ -1863,8 +2305,17 @@ class TrackedJunction:
         if junc_params != None:
             junc_params = load_params(junc_params, "junc_params", step=self.curr_time)
 
+            valid_params = {"flow_params": dict, "meter_params": dict}
+            error, desc = test_input_dict(junc_params, valid_params, "'{0}' junction".format(self.id))
+            if error != None: raise_error(error, desc, self.sim.curr_step)
+
             if "flow_params" in junc_params.keys():
                 flow_params = junc_params["flow_params"]
+
+                valid_params = {"inflow_detectors": (list, tuple), "outflow_detectors": (list, tuple), "vehicle_types": list}
+                error, desc = test_input_dict(flow_params, valid_params, "'{0}' flow".format(self.id), required=["inflow_detectors", "outflow_detectors"])
+                if error != None: raise_error(error, desc, self.sim.curr_step)
+
                 if "inflow_detectors" in flow_params.keys() or "outflow_detectors" in flow_params.keys():
                     if not ("inflow_detectors" in flow_params.keys() and "outflow_detectors" in flow_params.keys()):
                         desc = "Both 'inflow_detectors' and 'outflow_detectors' are required parameters to track flow (Junction ID: '{0}').".format(self.id)
@@ -1883,16 +2334,22 @@ class TrackedJunction:
                         self.inflow_detectors = flow_params["inflow_detectors"]
                         self.outflow_detectors = flow_params["outflow_detectors"]
 
-                    if "flow_vtypes" in flow_params.keys(): self.flow_vtypes = ["all"] + flow_params["flow_vtypes"]
+                    if "vehicle_types" in flow_params.keys(): self.flow_vtypes = ["all"] + flow_params["vehicle_types"]
                     else: self.flow_vtypes = ["all"]
                     
-                    self.v_in, self.v_out = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
-                    self.inflows, self.outflows = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
+                    self.v_in, self.v_out = {vehicle_type: [] for vehicle_type in self.flow_vtypes}, {vehicle_type: [] for vehicle_type in self.flow_vtypes}
+                    self.inflows, self.outflows = {vehicle_type: [] for vehicle_type in self.flow_vtypes}, {vehicle_type: [] for vehicle_type in self.flow_vtypes}
 
                     self.track_flow = True
 
             if "meter_params" in junc_params.keys():
                 meter_params = junc_params["meter_params"]
+
+                valid_params = {"min_rate": (int, float), "max_rate": (int, float), "ramp_edges": (list, tuple),
+                                "queue_detector": str, "init_rate": (int, float)}
+                error, desc = test_input_dict(meter_params, valid_params, "'{0}' meter".format(self.id), required=["min_rate", "max_rate"])
+                if error != None: raise_error(error, desc, self.sim.curr_step)
+
                 self.is_meter = True
                 self.min_rate, self.max_rate = meter_params["min_rate"], meter_params["max_rate"]
 
@@ -1980,8 +2437,8 @@ class TrackedJunction:
             self.avg_m_green, self.avg_m_red = [0 for _ in range(self.m_len)], [0 for _ in range(self.m_len)]
 
         if self.track_flow:
-            self.v_in, self.v_out = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
-            self.inflows, self.outflows = {vtype: [] for vtype in self.flow_vtypes}, {vtype: [] for vtype in self.flow_vtypes}
+            self.v_in, self.v_out = {vehicle_type: [] for vehicle_type in self.flow_vtypes}, {vehicle_type: [] for vehicle_type in self.flow_vtypes}
+            self.inflows, self.outflows = {vehicle_type: [] for vehicle_type in self.flow_vtypes}, {vehicle_type: [] for vehicle_type in self.flow_vtypes}
 
         if self.is_meter:
             self.metering_rates = []
@@ -2026,17 +2483,17 @@ class TrackedJunction:
 
         if self.track_flow:
             
-            for vtype in self.flow_vtypes:
-                new_v_in = self.sim.get_last_step_detector_vehicles(self.inflow_detectors, v_types=[vtype] if vtype != "all" else None, flatten=True)
-                new_v_in = list(set(new_v_in) - set(self.v_in[vtype]))
-                self.v_in[vtype] += new_v_in
-                self.inflows[vtype].append(len(new_v_in))
+            for vehicle_type in self.flow_vtypes:
+                new_v_in = self.sim.get_last_step_detector_vehicles(self.inflow_detectors, vehicle_types=[vehicle_type] if vehicle_type != "all" else None, flatten=True)
+                new_v_in = list(set(new_v_in) - set(self.v_in[vehicle_type]))
+                self.v_in[vehicle_type] += new_v_in
+                self.inflows[vehicle_type].append(len(new_v_in))
 
-            for vtype in self.flow_vtypes:
-                new_v_out = self.sim.get_last_step_detector_vehicles(self.outflow_detectors, v_types=[vtype] if vtype != "all" else None, flatten=True)
-                new_v_out = list(set(new_v_out) - set(self.v_out[vtype]))
-                self.v_out[vtype] += new_v_out
-                self.outflows[vtype].append(len(new_v_out))
+            for vehicle_type in self.flow_vtypes:
+                new_v_out = self.sim.get_last_step_detector_vehicles(self.outflow_detectors, vehicle_types=[vehicle_type] if vehicle_type != "all" else None, flatten=True)
+                new_v_out = list(set(new_v_out) - set(self.v_out[vehicle_type]))
+                self.v_out[vehicle_type] += new_v_out
+                self.outflows[vehicle_type].append(len(new_v_out))
 
         if self.measure_queues:
 
@@ -2124,11 +2581,10 @@ class TrackedEdge:
 
         veh_data = []
         for veh_id in last_step_vehs:
-            speed = self.sim.get_vehicle_vals(veh_id, "speed")
-            coors = self.sim.get_vehicle_vals(veh_id, "position")
-            x = self._get_distance_on_road(coors)
-            if self.sim.units in ['IMPERIAL']: x *= 0.0006213712
-            veh_data.append((veh_id, x, speed))
+            vals = self.sim.get_vehicle_vals(veh_id, ["speed", "position", "lane_idx"])
+            pos = self._get_distance_on_road(vals["position"])
+            if self.sim.units in ['IMPERIAL']: pos *= 0.0006213712
+            veh_data.append((veh_id, pos, vals["speed"], vals["lane_idx"]))
 
         self.step_vehicles.append(veh_data)
             
@@ -2145,7 +2601,7 @@ def print_summary(sim_data, save_file=None, tab_width=58):
     Prints a summary of a sim_data file or dictionary, listing
     simulation details, vehicle statistics, detectors, controllers,
     tracked edges/junctions and events.
-    :param sim_data: Simulation data dictionary or filepath
+    :param sim_data:  Simulation data dictionary or filepath
     :param save_file: '.txt' filename, if given will be used to save summary
     :param tab_width: Table width
     """
@@ -2159,12 +2615,18 @@ def print_summary(sim_data, save_file=None, tab_width=58):
             desc = "{0}: Invalid save_file type (must be 'str', not '{1}').".format(caller, type(save_file).__name__)
             raise TypeError(desc)
     
-    if isinstance(sim_data, str) and sim_data.endswith(".json"):
-        if os.path.exists(sim_data):
-            with open(sim_data, "r") as fp:
-                sim_data = json.load(fp)
+    if isinstance(sim_data, str):
+        if sim_data.endswith(".json"): r_class, r_mode = json, "r"
+        elif sim_data.endswith(".pkl"): r_class, r_mode = pkl, "rb"
         else:
-            desc = "{0}: sim_data file '{1}' not found or is invalid.".format(caller, sim_data)
+            desc = "{0}: sim_data file '{1}' is invalid (must be '.json' or '.pkl').".format(caller, sim_data)
+            raise ValueError(desc)
+
+        if os.path.exists(sim_data):
+            with open(sim_data, r_mode) as fp:
+                sim_data = r_class.load(fp)
+        else:
+            desc = "{0}: sim_data file '{1}' not found.".format(caller, sim_data)
             raise FileNotFoundError(desc)
     elif not isinstance(sim_data, dict):
         desc = "{0}: Invalid sim_data type (must be [str|dict], not '{1}').".format(caller, type(sim_data).__name__)
@@ -2225,7 +2687,6 @@ def print_summary(sim_data, save_file=None, tab_width=58):
     print(tertiary_delineator)
     _table_print(["Total TTS:", "{0}s".format(round(sum(sim_data["data"]["vehicles"]["tts"]), 2))], tab_width)
     _table_print(["Total Delay:", "{0}s".format(round(sum(sim_data["data"]["vehicles"]["delay"]), 2))], tab_width)
-    _table_print(["Individual Data:", "Yes" if "all_vehicles" in sim_data["data"].keys() else "No"], tab_width)
 
     print(secondary_delineator)
     _table_print("Trip Data", tab_width)

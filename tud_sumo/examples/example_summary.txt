@@ -2,15 +2,15 @@
  |                          A20_ITCS                          | 
  *============================================================*
  |                        Description:                        | 
- |    Example traffic controllers, with a ramp meter, VSL     | 
- |               controller and route guidance.               | 
+ |   Example traffic controllers, with 2 ramp meters, 1 VSL   | 
+ |        controller and 1 route guidance controller.         | 
  *============================================================*
- |                 Simulation Run: 06/06/2024                 | 
- |               16:51:37 - 16:51:46 (0:00:09)                | 
+ |                 Simulation Run: 21/06/2024                 | 
+ |               14:59:53 - 15:00:05 (0:00:12)                | 
  *------------------------------------------------------------*
  | Number of Steps:                                       500 | 
  | Step Length:                                           1.0 | 
- | Avg. Step Duration:                                 0.018s | 
+ | Avg. Step Duration:                                 0.024s | 
  | Units Type:                              Metric (km, km/h) | 
  | Seed:                                                    1 | 
  *============================================================*
@@ -18,19 +18,18 @@
  *============================================================*
  |                        Vehicle Data                        | 
  *------------------------------------------------------------*
- | Avg. No. Vehicles:                                   757.9 | 
- | Peak No. Vehicles:                                    1277 | 
- | Final No. Vehicles:                                   1277 | 
+ | Avg. No. Vehicles:                                  766.18 | 
+ | Peak No. Vehicles:                                    1279 | 
+ | Final No. Vehicles:                                   1278 | 
  | Individual Data:                                        No | 
  * ---------------------------------------------------------- *
- | Total TTS:                                       378952.0s | 
- | Total Delay:                                      10689.0s | 
- | Individual Data:                                        No | 
+ | Total TTS:                                       383089.0s | 
+ | Total Delay:                                      22043.0s | 
  *------------------------------------------------------------*
  |                         Trip Data                          | 
  *------------------------------------------------------------*
- | Incomplete Trips:                             1276 (68.2%) | 
- | Completed Trips:                               594 (31.8%) | 
+ | Incomplete Trips:                             1282 (67.7%) | 
+ | Completed Trips:                               611 (32.3%) | 
  *------------------------------------------------------------*
  |                         Detectors                          | 
  *------------------------------------------------------------*
@@ -67,5 +66,5 @@
  |                    Event IDs & Statuses                    | 
  *------------------------------------------------------------*
  |                 Active: incident_response                  | 
- |                    Completed: incident                     | 
+ |             Completed: incident_1, bottleneck              | 
  *------------------------------------------------------------*

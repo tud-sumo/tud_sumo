@@ -15,6 +15,10 @@ class VSLController:
 
         self.activated = False
 
+        valid_params = {"type": (str, int), "geometry_ids": (list, tuple), "def_limits": (int, float)}
+        error, desc = test_input_dict(vsl_params, valid_params, "VSL controller", required=["type", "geometry_ids"])
+        if error != None: raise_error(error, desc, self.sim.curr_step)
+
         if "geometry_ids" not in vsl_params.keys():
             desc = "Geometry ID(s) are a required input for VSL controllers (key: 'geometry_ids')."
             raise_error(KeyError, desc, self.sim.curr_step)
@@ -118,6 +122,12 @@ class RGController:
 
         self.activated = False
         self.activation_times = []
+
+        valid_params = {"type": (str, int), "old_destination": str, "new_destination": str, "diversion_pct": (int, float),
+                        "vehicle_type": (str, list, tuple), "detector_ids": (list, tuple), "highlight": (str, tuple)}
+        
+        error, desc = test_input_dict(rg_params, valid_params, "RG controller", required=["type", "detector_ids"])
+        if error != None: raise_error(error, desc, self.sim.curr_step)
         
         self.old_target = None if "old_destination" not in rg_params.keys() else rg_params["old_destination"]
         self.target = None if "new_destination" not in rg_params.keys() else rg_params["new_destination"]
@@ -128,8 +138,8 @@ class RGController:
         self.diverted_vehs = set([])
         self.diversion_pct = 1.0 if "diversion_pct" not in rg_params.keys() else rg_params["diversion_pct"]
 
-        if "vtype" in rg_params.keys():
-            self.diversion_vtypes = rg_params["vtype"]
+        if "vehicle_type" in rg_params.keys():
+            self.diversion_vtypes = rg_params["vehicle_type"]
             if not isinstance(self.diversion_vtypes, (list, tuple)):
                 self.diversion_vtypes = [self.diversion_vtypes]
         else: self.diversion_vtypes = None
@@ -243,15 +253,15 @@ class RGController:
         n_diverted, total_vehs = 0, 0
 
         if self.activated:
-            all_vehs = self.sim.get_last_step_detector_vehicles(self.detector_ids, v_types=self.diversion_vtypes, flatten=True)
+            all_vehs = self.sim.get_last_step_detector_vehicles(self.detector_ids, vehicle_types=self.diversion_vtypes, flatten=True)
             for veh_id in all_vehs:
                 total_vehs += 1
                 if veh_id not in self.diverted_vehs and random() <= self.diversion_pct:
                     if self.old_target == None or self.sim.get_vehicle_vals("new_destination") == self.old_target:
                         if self.g_type == 'EDGE':
-                            self.sim.set_vehicle_vals(veh_id, destination=self.target, highlight=self.highlight_colour)
+                            self.sim.set_vehicle_vals(veh_id, destination=self.target, colour=self.highlight_colour)
                         elif self.g_type == 'ROUTE':
-                            self.sim.set_vehicle_vals(veh_id, route_id=self.target, highlight=self.highlight_colour)
+                            self.sim.set_vehicle_vals(veh_id, route_id=self.target, colour=self.highlight_colour)
 
                         n_diverted += 1
                         self.diverted_vehs.add(veh_id)

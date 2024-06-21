@@ -2,6 +2,7 @@ import json, os, math, inspect, numpy as np
 from enum import Enum
 from datetime import datetime
 import traci.constants as tc
+import pickle as pkl
 
 date_format = "%d/%m/%Y"
 time_format = "%H:%M:%S"
@@ -12,11 +13,11 @@ time_desc = {"s": "Seconds", "m": "Minutes", "hr": "Hours"}
 
 traci_constants = {"vehicle": {
                                 "speed": tc.VAR_SPEED, "is_stopped": tc.VAR_SPEED, "max_speed": tc.VAR_MAXSPEED, "acceleration": tc.VAR_ACCELERATION,
-                                "position": tc.VAR_POSITION, "altitude": tc.VAR_POSITION3D, "heading": tc.VAR_ANGLE, "lane_idx": tc.VAR_LANE_INDEX,
-                                "route_id": tc.VAR_ROUTE_ID, "route_idx": tc.VAR_ROUTE_INDEX, "route_edges": tc.VAR_ROUTE},
+                                "position": tc.VAR_POSITION, "altitude": tc.VAR_POSITION3D, "heading": tc.VAR_ANGLE, "edge_id": tc.VAR_ROAD_ID,
+                                "lane_idx": tc.VAR_LANE_INDEX, "route_id": tc.VAR_ROUTE_ID, "route_idx": tc.VAR_ROUTE_INDEX, "route_edges": tc.VAR_ROUTE},
                    "detector": {
-                                "vehicle_count": tc.LAST_STEP_VEHICLE_NUMBER, "vehicle_ids": tc.LAST_STEP_VEHICLE_ID_LIST, "speed": tc.LAST_STEP_MEAN_SPEED,
-                                "halting_no": tc.LAST_STEP_VEHICLE_HALTING_NUMBER, "occupancy": tc.LAST_STEP_OCCUPANCY, "last_detection": tc.LAST_STEP_TIME_SINCE_DETECTION},
+                                "vehicle_count": tc.LAST_STEP_VEHICLE_NUMBER, "vehicle_ids": tc.LAST_STEP_VEHICLE_ID_LIST, "lsm_speed": tc.LAST_STEP_MEAN_SPEED,
+                                "halting_no": tc.LAST_STEP_VEHICLE_HALTING_NUMBER, "lsm_occupancy": tc.LAST_STEP_OCCUPANCY, "last_detection": tc.LAST_STEP_TIME_SINCE_DETECTION},
                    "geometry": {
                                 "vehicle_count": tc.LAST_STEP_VEHICLE_NUMBER, "vehicle_ids": tc.LAST_STEP_VEHICLE_ID_LIST, "vehicle_speed": tc.LAST_STEP_MEAN_SPEED,
                                 "halting_no": tc.LAST_STEP_VEHICLE_HALTING_NUMBER, "occupancy": tc.LAST_STEP_OCCUPANCY}
@@ -76,7 +77,7 @@ def get_scenario_name(filepath: str) -> str:
     """
     Get scenario name from filepath.
     :param filepath: '.sumocfg' or '.neteditcfg' filename
-    :return str: Scenario name
+    :return str:     Scenario name
     """
     cfg_file = filepath.split('/')[-1]
     if cfg_file.endswith('.sumocfg'): cfg_file = cfg_file.removesuffix('.sumocfg')
@@ -86,10 +87,10 @@ def get_scenario_name(filepath: str) -> str:
 def load_params(parameters: str|dict, params_name: str|None = None, step: int|None = None) -> dict:
     """
     Load parameters file. Handles either dict or json file.
-    :param parameters: Parameters dict or filepath
+    :param parameters:  Parameters dict or filepath
     :param params_name: Parameter dict function (for error messages)
-    :param step: Current simulation step (for error messages)
-    :return dict: Parameters dict
+    :param step:        Current simulation step (for error messages)
+    :return dict:       Parameters dict
     """
 
     caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
@@ -98,12 +99,16 @@ def load_params(parameters: str|dict, params_name: str|None = None, step: int|No
 
     if not isinstance(parameters, (dict, str)):
         raise TypeError("{0}: Invalid {1} (must be [dict|filepath (str)], not '{2}').".format(caller, params_name, type(parameters).__name__))
-    elif isinstance(parameters, str) and parameters.endswith(".json"):
+    elif isinstance(parameters, str):
+        if parameters.endswith(".json"): r_class, r_mode = json, "r"
+        elif parameters.endswith(".pkl"): r_class, r_mode = pkl, "rb"    
+        else:
+            raise ValueError("{0}: Invalid parameters file '{1}' (must be '.json' or '.pkl' file).".format(caller, parameters))
+
         if os.path.exists(parameters):
-            with open(parameters, "r") as fp:
-                parameters = json.load(fp)
+            with open(parameters, r_mode) as fp:
+                parameters = r_class.load(fp)
         else: raise FileNotFoundError("{0}: Parameters file '{1}' not found.".format(caller, parameters))
-    elif isinstance(parameters, str): raise ValueError("{0}: Invalid parameters file '{1}' (must be '.json' file).".format(caller, parameters))
 
     return parameters
 
@@ -124,8 +129,8 @@ def get_axis_lim(data_vals, end_buff = 0.05):
     """
     Get axis limit rounded to nearest 1000/100/10 (with buffer).
     :param data_vals: Single (max) axis value, or list of values
-    :param end_buff: Minimum axis buffer above maximum value (default to 5%)
-    :return float: Axis limit
+    :param end_buff:  Minimum axis buffer above maximum value (default to 5%)
+    :return float:    Axis limit
     """
     
     pct_buff = 1 + end_buff
@@ -165,53 +170,41 @@ def limit_vals_by_range(time_steps, data_vals=None, time_range=None):
                 return new_steps, new_vals
     else: return [step for step in time_steps if step >= time_range[0] and step <= time_range[1]]
 
-def get_space_time_matrix(sim_data, edge_ids=None, x_resolution=1, y_resolution=10, upstream_at_top=True):
-    """
-    Converts edge vehicle positions and speeds to a space-time matrix.
-    :param sim_data: Simulation data (dict)
-    :param edge_ids: List of tracked edge IDs or single ID
-    :param x_resolution: X axis matrix resolution
-    :param y_resolution: Y axis matrix resolution
-    :param upstream_at_top: If true, upstream values are displayed at the top of the matrix
-    :return np.array: NumPy matrix
-    """
+def get_most_similar_string(input_string, valid_strings, req_similarity=0.6):
+    best_match, similarity = None, 0
+    for valid_string in valid_strings:
+        val = len((set(input_string.lower())).intersection(set(valid_string.lower())))
+        if val > similarity and val >= req_similarity * len(valid_string):
+            best_match, similarity = valid_string, val
+    return best_match
 
-    if "edges" in sim_data["data"].keys():
-        edge_data = sim_data["data"]["edges"]
-        if edge_ids == None: edge_ids = list(edge_data.keys())
-        elif not isinstance(edge_ids, (list, tuple)): edge_ids = [edge_ids]
-        for edge_id in edge_ids:
-            if edge_id in edge_data.keys():
-                n_steps = len(edge_data[edge_id]["step_vehicles"])
-            else: raise KeyError("Plotter.plot_space_time_diagram(): Edge '{0}' not found in tracked edge.".format(edge_id))
-    else: raise KeyError("Plotter.plot_space_time_diagram(): No edges tracked during the simulation.")
+def test_input_dict(input_dict, valid_params, dict_name="", required=None) -> str:
 
-    total_len = sum([edge_data[e_id]["length"] for e_id in edge_ids])
+    desc = None
+    dict_name = dict_name + " " if dict_name != "" else dict_name
+
+    if len(input_dict) == 0:
+        desc = "Empty {0}parameters given.".format(dict_name)
+        return (ValueError, desc)
     
-    n_vehicle_matrix = np.zeros((math.ceil(total_len / y_resolution), math.ceil(n_steps / x_resolution)))
-    speed_matrix = np.zeros((math.ceil(total_len / y_resolution), math.ceil(n_steps / x_resolution)))
-
-    edge_offset = 0
-    for e_id in edge_ids:
-        e_data = sim_data["data"]["edges"][e_id]
-
-        step_vehicles = e_data["step_vehicles"]
+    if isinstance(required, bool) and required: required = list(valid_params.keys())
+    if required != None:
+        missing_keys = list(set(required) - set(input_dict.keys()))
+        if len(missing_keys) > 0:
+            desc = "Missing required {0}parameters ('{1}').".format(dict_name, "', '".join(list(missing_keys)))
+            return (KeyError, desc)
         
-        edge_length = e_data["length"]
+    for key, item in input_dict.items():
+        if key not in valid_params:
+            desc = "Unrecognised {0}parameter '{1}'".format(dict_name, key)
+            close_match = get_most_similar_string(key, valid_params.keys())
+            desc = "{0}, did you mean '{1}'?".format(desc, close_match) if close_match != None else desc + "."
+            return (KeyError, desc)
+        if not isinstance(item, valid_params[key]):
+            if isinstance(valid_params[key], (list, tuple)):
+                type_str = "[{0}]".format("|".join([str(val.__name__) for val in valid_params[key]]))
+            else: type_str == valid_params[key].__name__
+            desc = "Invalid {0} type '{1}' (must be '{2}' not '{3}')".format(key, item, type_str, type(item).__name__)
+            return (TypeError, desc)
         
-        for idx, step_data in enumerate(step_vehicles):
-            for veh_data in step_data:
-                x_val = math.floor(idx / x_resolution)
-                y_val = math.floor(((veh_data[0] * edge_length) + edge_offset) / y_resolution)
-
-                total_speed = (speed_matrix[y_val][x_val] * n_vehicle_matrix[y_val][x_val]) + veh_data[1]
-                n_vehicle_matrix[y_val][x_val] += 1
-                speed_matrix[y_val][x_val] = total_speed / n_vehicle_matrix[y_val][x_val]
-
-        edge_offset += edge_length
-
-    if not upstream_at_top:
-        n_vehicle_matrix = np.flip(n_vehicle_matrix, 0)
-        speed_matrix = np.flip(speed_matrix, 0)
-
-    return speed_matrix, n_vehicle_matrix
+    return (None, None)

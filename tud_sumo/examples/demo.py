@@ -1,9 +1,7 @@
 
-from random import randint, seed
+from random import randint, seed, choice
 import sys
 from tqdm import tqdm
-
-seed(1)
 
 sys.path.insert(0, '..')
 from simulation import *
@@ -12,17 +10,19 @@ from plot import Plotter
 if __name__ == "__main__":
 
     # Initialise the simulation object.
-    my_sim = Simulation(scenario_name="A20_ITCS", scenario_desc="Example traffic controllers, with a ramp meter, VSL controller and route guidance.")
+    my_sim = Simulation(scenario_name="A20_ITCS", scenario_desc="Example traffic controllers, with 2 ramp meters, 1 VSL controller and 1 route guidance controller.")
 
+    sim_seed = "1" if "-seed" not in sys.argv[:-1] else sys.argv[sys.argv.index("-seed")+1]
+    seed(int(sim_seed))
+    
     # Start the simulation, defining the sumo config files.
     my_sim.start("example_scenario/a20.sumocfg", get_individual_vehicle_data=False, gui="-gui" in sys.argv,
-                 seed="random" if "-seed" not in sys.argv[:-1] else sys.argv[sys.argv.index("-seed")+1],
-                 units=1) # Units can either be metric (km,kmph)/imperial (mi,mph)/UK (km,mph). All data collected is in these units.
-
+                 seed=sim_seed, units=1) # Units can either be metric (km,kmph)/imperial (mi,mph)/UK (km,mph). All data collected is in these units.
+    
     # Add a tracked junction to the intersection with ID "utsc", which will track signal phases/times.
     my_sim.add_tracked_junctions({"utsc": {"flow_params": {"inflow_detectors": ["utsc_n_in_1", "utsc_n_in_2", "utsc_w_in", "utsc_e_in"],
                                                            "outflow_detectors": ["utsc_w_out", "utsc_e_out"],
-                                                           "flow_vtypes": ["cars", "lorries", "motorcycles", "vans"]}}})
+                                                           "vehicle_types": ["cars", "lorries", "motorcycles", "vans"]}}})
 
     # Set traffic signal phases. The junc_phases dict can be used for multiple junctions.
     my_sim.set_phases({"utsc": {"phases": ["GGrr", "yyrr", "rrGG", "rryy"], "times": [27, 3, 17, 3]}})
@@ -50,21 +50,30 @@ if __name__ == "__main__":
     # Add scheduled events from a JSON file (can be dictionary). Use the format as in example_incident.json
     my_sim.add_events("example_scenario/example_incident.json")
 
-    n, sim_dur = 50, 500
+    # These individual functions above can be replaced as below, where the 'parameters.json' file contains
+    # a dictionary of all necessary parameters (under 'edges', 'junctions', 'phases', 'controllers' and 'events')
+    # my_sim.load_objects("parameters.json")
+    
+    n, sim_dur, new_veh_idx = 1, 500, 0
     pbar = tqdm(desc="Running sim (step 0, 0 vehs)", total=sim_dur)
     while my_sim.curr_step < sim_dur:
 
         # Set ramp metering rate.
-        my_sim.set_tl_metering_rate("crooswijk_meter", randint(1200, 2000))
-        my_sim.set_tl_metering_rate("a13_meter", randint(1200, 2000))
+        my_sim.set_tl_metering_rate(rm_id="crooswijk_meter", metering_rate=randint(1200, 2000))
+        my_sim.set_tl_metering_rate(rm_id="a13_meter", metering_rate=randint(1200, 2000))
         
         # Step through n steps.
-        my_sim.step_through(n, pbar=pbar)
+        my_sim.step_through(n_steps=n, pbar=pbar)
 
-        # Add a new vehicle
-        if my_sim.curr_step % n == 0:
-            my_sim.add_vehicle("lorry_"+str(randint(0, 100)), "lorries", ("urban_in_e", "urban_out_w"), origin_lane="first")
-            my_sim.add_vehicle("car_"+str(randint(0, 100)), "cars", ("urban_in_w", "urban_out_e"))
+        # Add new vehicles going from "urban_in_e" to "urban_out_w"
+        if my_sim.curr_step % 50 == 0:
+            od_pair = ("urban_in_e", "urban_out_w")
+            my_sim.add_vehicle(vehicle_id="lorry_"+str(new_veh_idx), vehicle_type="lorries", routing=od_pair, origin_lane="first")
+            my_sim.add_vehicle(vehicle_id="car_"+str(new_veh_idx), vehicle_type="cars", routing=od_pair)
+            new_veh_idx += 1
+
+        if my_sim.curr_step == 100:
+            my_sim.cause_incident(100, n_vehicles=2, edge_speed=5)
 
         if my_sim.curr_step == 250:
             # Activate controllers & update UTSC phases.
