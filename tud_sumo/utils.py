@@ -45,6 +45,7 @@ def raise_warning(desc, curr_sim_step=None):
     if curr_sim_step != None: warning_msg = "(step {0}) ".format(curr_sim_step) + warning_msg
     print(warning_msg)
 
+"""
 def convert_time_units(time_vals, unit, step_len, keep_arr=False):
     if not isinstance(time_vals, list): time_vals = [time_vals]
     if unit == "s" and step_len != None:
@@ -56,12 +57,70 @@ def convert_time_units(time_vals, unit, step_len, keep_arr=False):
 
     if len(time_vals) == 1 and not keep_arr: return time_vals[0]
     else: return time_vals
+"""
+
+def convert_units(values, orig_units, new_units, step_length=1, keep_arr=False):
+
+    if isinstance(values, (int, float)): values = [values]
+    elif not isinstance(values, (list, tuple)):
+        desc = "Invalid values '{0}' type (must be [int|float|list|tuple], not '{1}').".format(values, type(values).__name__)
+        raise_error(TypeError, desc)
+    elif False in [isinstance(val, (int, float)) for val in values]:
+        desc = "Invalid values '{0}' type (list must be only contain [int|float]).".format(values)
+        raise_error(ValueError, desc)
+
+    c_mats = {"distance":
+                  {"units": ["metres", "kilometres", "yards", "feet", "miles"],
+                   "matrix": [[1, 1/1000, 1.093613, 3.280840, 1/1609.344498], # m
+                              [1000, 1, 1093.613298, 3280.839895, 1/1.609344], # km
+                              [1/1.093613,  1/1093.613298, 1, 3, 1/1760], # yd
+                              [1/3.280840,  1/3280.839895, 1/3, 1, 1/5280], # ft
+                              [1609.344498, 1.609344, 1760, 5280, 1]] # mi
+                  },
+              "speed":
+                  {"units": ["m/s", "kmph", "mph"],
+                   "matrix": [[1, 3.6, 2.236936], # m/s
+                              [1/3.6, 1, 1/1.609344], # kmph
+                              [1/2.236936, 1.609344, 1]] # mph
+                  },
+              "time":
+                  {"units": ["steps", "seconds", "minutes", "hours"],
+                   "matrix": [[1, step_length, step_length/60, step_length/3600], # steps
+                              [1/step_length, 1, 1/60, 1/3600], # s
+                              [60/step_length, 60, 1, 1/60], # m
+                              [3600/step_length, 3600, 60, 1]] # hr
+                  }
+             }
+    
+    o_class = [key for key, val in c_mats.items() if orig_units in val["units"]]
+    n_class = [key for key, val in c_mats.items() if new_units in val["units"]]
+
+    if len(o_class) == 0:
+        desc = "Unknown unit '{0}'.".format(orig_units)
+        raise_error(ValueError, desc)
+    else: o_class = o_class[0]
+
+    if len(n_class) == 0:
+        desc = "Unknown unit '{0}'.".format(new_units)
+        raise_error(ValueError, desc)
+    else: n_class = n_class[0]
+
+    if o_class != n_class:
+        desc = "Invalid conversion (cannot convert '{0}' ({1}) -> '{2}' ({3}))".format(o_class, orig_units, n_class, new_units)
+        raise_error(ValueError, desc)
+    
+    o_idx = c_mats[o_class]["units"].index(orig_units)
+    n_idx = c_mats[o_class]["units"].index(new_units)
+    values = [value * c_mats[o_class]["matrix"][o_idx][n_idx] for value in values]
+    if len(values) == 1 and not keep_arr: values = values[0]
+
+    return values
 
 def get_time_steps(data_vals, unit, step_len=None, start=0):
     time_vals = list(range(len(data_vals)))
     time_vals = [val + start for val in time_vals]
 
-    return convert_time_units(time_vals, unit, step_len)
+    return convert_units(time_vals, "steps", unit, step_len)
          
 def get_time_str():
     date_str = datetime.now().strftime(datetime_format)

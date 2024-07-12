@@ -1,6 +1,6 @@
 # TU Delft SUMO Wrapper
 
-Python SUMO wrapper, using traci, written for the AIM Lab at TU Delft by Callum Evans. Usage and output examples can be found in the `tud_sumo/examples` directory.
+Python SUMO wrapper, using traci, written for the DIAMoND Lab at TU Delft by Callum Evans. Usage and output examples can be found in the `tud_sumo/examples` directory.
 
 ![Header - Delft](https://i.imgur.com/dYrHOPY.png)
 

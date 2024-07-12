@@ -32,6 +32,7 @@
                 "70944365",
                 "308977078"
             ],
+            "effect_duration": 100,
             "effect_probability": 1,
             "speed_safety_checks": false,
             "lc_safety_checks": false

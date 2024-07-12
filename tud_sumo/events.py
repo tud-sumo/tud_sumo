@@ -29,6 +29,20 @@ class EventScheduler:
         return schedule_dict
     
     def __name__(self): return "EventScheduler"
+
+    def get_event_ids(self, event_statuses=None):
+        if event_statuses == None: event_statuses = ["scheduled", "active", "completed"]
+        elif isinstance(event_statuses, str): event_statuses = [event_statuses]
+
+        event_ids = []
+        if "scheduled" in event_statuses:
+            event_ids += list(self.scheduled_events.keys())
+        if "active" in event_statuses:
+            event_ids += list(self.active_events.keys())
+        if "completed" in event_statuses:
+            event_ids += list(self.completed_events.keys())
+
+        return event_ids
     
     def add_events(self, events):
 
@@ -115,8 +129,7 @@ class Event:
                 raise_error(FileNotFoundError, desc, self.sim.curr_step)
 
         valid_params = {"start_time": (int, float), "start_step": (int, float), "end_time": (int, float),
-                        "end_step": (int, float), "event_n_steps": (int, float), "event_duration": (int, float),
-                        "edges": dict, "vehicles": dict}
+                        "end_step": (int, float), "edges": dict, "vehicles": dict}
         error, desc = test_input_dict(event_params, valid_params, "event")
         if error != None: raise_error(error, desc, self.sim.curr_step)
 
@@ -130,10 +143,6 @@ class Event:
             self.end_time = event_params["end_time"] / self.sim.step_length
         elif "end_step" in event_params.keys():
             self.end_time = event_params["end_step"]
-        elif "event_n_steps" in event_params.keys():
-            self.end_time = self.start_time + event_params["event_n_steps"]
-        elif "event_duration" in event_params.keys():
-            self.end_time = self.start_time + (event_params["event_duration"] / self.sim.step_length)
         else:
             self.end_time = math.inf
 
@@ -170,7 +179,10 @@ class Event:
                 self.locations = veh_params["locations"]
             elif "vehicle_ids" in veh_params:
                 self.vehicle_ids = veh_params["vehicle_ids"]
-            
+            else:
+                desc = "Event 'locations' or 'vehicle_ids' are not given and one is required."
+                raise_error(KeyError, desc, self.sim.curr_step)
+
             self.v_effect_dur = math.inf if "effect_duration" not in veh_params.keys() else veh_params["effect_duration"]
             self.v_actions, self.v_base, self.affected_vehicles = veh_params["actions"], {}, {}
 
