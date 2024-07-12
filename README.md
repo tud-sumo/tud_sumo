@@ -2,6 +2,8 @@
 
 Python SUMO wrapper, using traci, written for the DIAMoND Lab at TU Delft by Callum Evans. Usage and output examples can be found in the `tud_sumo/examples` directory.
 
+The full documentation can be found [here](https://tuds-wiki.github.io/docs/). 
+
 ![Header - Delft](https://i.imgur.com/dYrHOPY.png)
 
 ## Requirements 
