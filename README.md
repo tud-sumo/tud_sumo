@@ -12,37 +12,34 @@ Python 3.10 or later is required. Dependencies are; `tqdm`, `matplotlib`, `shape
 
 ## Latest Updates
 
-### Pickle support, dynamic incidents & validation
+### Demand Generation, More Getters and General Fixes 
 
-#### New Additions
- - Added pickle support and `.pkl` version of example data. All files can be saved/read as either pickle or JSON files.
- - Added `Simulation.cause_incident()` to (randomly) create an incident in the simulation.
- - Added `highlight` to `Simulation.set_vehicle_vals()`.
- - Added `Scheduler.get_event_status()`
- - Added `remove_affected_vehicles`, `speed_safety_checks` and `lc_safety_checks` options to events.
- - Added a toggle for `speed_safety_checks` and `lc_safety_checks` to `Simulation.set_vehicle_vals()`.
- - Added `connected_edges` to `Simulation.get_geometry_vals()` to return incoming and outgoing edges for a given edge.
- - Added `Simulation.load_objects()` function to load edge/junction/phase/controller/event parameters in a single dict or file.
- - Added `type`, `position` to `Simulation.get_detector_vals()`.
- - Added `edge_id` as a vehicle subscription.
- - Added `Simulation.get_[vehicle|geometry|detector]_ids()` and `Simulation.get_vehicle_types()` functions.
-
-#### Improvements
- - Improved validation for dictionary inputs (checking valid/required keys and data types).
- - All getter and setter 'vals' functions (`Simulation.[get|set]_[vehicle|geometry|detector]_vals()`) now accept multiple IDs. Getters will return a dictionary containing each object's information, whilst setters set values for all objects.
- - Improved type checking & resulting errors.
- - Improved seed checking, now allowing strings/integers/"random".
- - Trip data shows `"removal"` time instead of `"departure"` time if a vehicle is removed manually.
+#### Added
+  - Added dynamic demand generation with `Simulation.load_demand()` and `Simulation.add_demand()` functions.
+  - Added demand to `sim_data` dictionary.
+  - Added number of waiting vehicles to collected data.
+  - Added more getters for data: `Simulation.get_[no_vehicles/no_waiting/tts/delay]()`.
+  - Added `Simulation.get_[junction/tracked_junction/tracked_edge/event/controller]_exists()` functions.
+  - Added `Simulation.get_[junction/tracked_junction/tracked_edge/event/controller]_ids()` functions.
+  - Added `Simulation.remove_controllers()` function.
+  - Added `Plotter.plot_od_demand()` function.
+  - Added `utils.conver_units()` function and removed `utils.convert_time_units()`.
+  - Added `EventScheduler.get_event_ids()` function to get status of event.
+  - Added basic `Plotter.plot_fundamental_diagram()` function.
+  - Added `'incoming_edges'`, `'outgoing_edges'`, `'junction_ids'`, `'ff_travel_time'` and `'curr_travel_time'` to `Simulation.get_geometry_vals()`.
 
 #### Changes
- - Changed all instances of `vtype`/`v_type` to `vehicle_type`.
- - Changed `highlight` to `colour` in `Simulation.set_vehicle_vals()`.
- - Changed detector `"occupancy"` and `"speed"` to `"lsm_occupancy"` and `"lsm_speed"` (last mean speed) in data files.
- - Added `Simulation._vehicles_in()` and `Simulation._vehicles_out()` functions.
- - `Simulation.get_last_step_detector_data()` is changed to `get_detector_vals` for consistency.
- - Changed `print_sim_data()` function to `print_sim_data_struct()`
- - Lane index is included in step vehicle data for tracked edges.
- - Removed `get_space_time_matrix()`
+  - Improved error handling.
+  - Added vehicle type filter to `Simulation.get_all_vehicle_data()` function.
+  - Changed `Simulation.vehicle_departed()` to `Simulation.vehicle_to_depart()`.
+  - Changed `Simulation.tracked_juncs` to `Simulation.tracked_junctions`.
+  - Changed 's' to 'seconds', 'm' to 'minutes', 'hr' to 'hours' wherever they appear.
+  - `VSLController` data now stored in the same format as `RGController` with an activation times list.
+  - Simplified activation times data in `RGController`.
+  - Changed `VSLController.set_limit()` to `VSLController.set_speed_limit()`.
+  - Changed `'EDGE'` and `'LANE'` to lowercase when getting geometry types.
+  - Changed `'stopped'` to `'is_stopped'` in vehicle data.
+  - Removed `'event_n_steps'` and `'event_duration'` from event parameters.
 
 #### Fixes
  - Fixed duplicate IDs when adding objects.
