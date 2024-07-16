@@ -8,30 +8,6 @@ Python SUMO wrapper, using traci, written for the DIAMoND Lab at TU Delft by Cal
 
 Python 3.10 or later is required. Dependencies are; `tqdm`, `matplotlib`, `mpl-tools`, `shapely`, `sumolib` and `traci`.
 
-## Development
-
-### Editable copy
-
-To install the package as an editable copy, run
-
-```
-pip install -e .
-```
-
-### Building a package from the source
-
-To build an installable wheel of the package, ensure you have [`build`](https://pypi.org/project/build/) installed, then run
-
-```
-python -m build .
-```
-
-You can then install the package using `pip`:
-
-```
-pip install dist/*.whl
-```
-
 ## Latest Updates
 
 ### Demand Generation, More Getters and General Fixes 
