@@ -1,10 +1,10 @@
 import json, math, os, pickle as pkl
 from random import random
-from utils import *
+from .utils import *
 
 class EventScheduler:
     def __init__(self, sim):
-        from simulation import Simulation
+        from .simulation import Simulation
 
         self.sim = sim
         self.scheduled_events = {}

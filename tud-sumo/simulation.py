@@ -4,10 +4,10 @@ import pickle as pkl
 from tqdm import tqdm
 from copy import copy, deepcopy
 from random import choices, choice, random, seed as set_seed
-from events import EventScheduler, Event
-from controllers import VSLController, RGController
+from .events import EventScheduler, Event
+from .controllers import VSLController, RGController
 from shapely.geometry import LineString, Point
-from utils import *
+from .utils import *
 
 class Simulation:
     def __init__(self, scenario_name: str|None = None, scenario_desc: str|None = None) -> None:

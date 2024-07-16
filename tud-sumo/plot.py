@@ -8,8 +8,8 @@ import matplotlib.patheffects as pe
 from matplotlib.colors import is_color_like as is_mpl_colour
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from simulation import Simulation
-from utils import *
+from .simulation import Simulation
+from .utils import *
 
 default_labels = {"no_vehicles": "No. of Vehicles", "no_waiting": "No. of Waiting Vehicles", "tts": "Total Time Spent (s)", "delay": "Delay (s)", "throughput": "Throughput (veh/hr)",
                   "vehicle_counts": "No. of Vehicles", "occupancies": "Occupancy (%)", "densities": "Density unit", "metres": "Distance (m)", "kilometres": "Distance (km)",

@@ -1,10 +1,10 @@
 import traci
 from random import random
-from utils import *
+from .utils import *
 
 class VSLController:
     def __init__(self, vsl_id: str|int, vsl_params: dict, simulation):
-        from simulation import Simulation
+        from .simulation import Simulation
 
         self.id = vsl_id
         self.c_type = Controller(1)
@@ -107,7 +107,7 @@ class VSLController:
 
 class RGController:
     def __init__(self, rg_id: str|int, rg_params: dict, simulation):
-        from simulation import Simulation
+        from .simulation import Simulation
 
         self.id = rg_id
         self.c_type = Controller(2)
