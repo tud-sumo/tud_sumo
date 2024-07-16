@@ -31,6 +31,11 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14"
 ]
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+]
 
 [project.urls]
 Documentation = "https://tud-sumo.github.io/docs/"
