@@ -8,3 +8,7 @@ Wiki/*
 tud_sumo/rm_plot.py
 tud_sumo/examples/create_scenarios.py
 *.xml
+dist/*
+tud_sumo.egg-info/*
+setup.cfg
+setup.py
