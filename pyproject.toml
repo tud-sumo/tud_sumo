@@ -11,12 +11,13 @@ authors = [{ name = "Callum Evans", email = "c.evans@tudelft.nl" }]
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = [
-    "traci",
-    "numpy",
     "matplotlib",
     "mpl-tools",
-    "tqdm",
+    "numpy",
+    "requests",
     "shapely",
+    "tqdm",
+    "traci",
 ]
 keywords = ["traffic simulator", "microscopic", "SUMO"]
 classifiers = [
