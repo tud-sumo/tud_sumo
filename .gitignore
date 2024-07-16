@@ -13,3 +13,4 @@ tud_sumo.egg-info/*
 setup.cfg
 setup.py
 pyproject.toml
+Build/*
