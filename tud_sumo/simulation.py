@@ -704,10 +704,6 @@ class Simulation:
         else:
 
             lens = [len(data_arr) for data_arr in prev_data["data"]["vehicles"].values()]
-            if len(detector_list) > 0:
-                lens += [len(detector_data["speeds"]) for detector_data in prev_data["data"]["detectors"].values()]
-                lens += [len(detector_data["vehicle_counts"]) for detector_data in prev_data["data"]["detectors"].values()]
-
             prev_steps = set(lens)
             
             if len(prev_steps) != 1:
