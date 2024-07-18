@@ -477,12 +477,12 @@ class Plotter:
                 ax.set_position([box.x0, box.y0 + box.height * 0.08,
                                 box.width, box.height * 0.92])
                 ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.13),
-                        fancybox=True, ncol=2)
+                        fancybox=True, ncol=2, shadow=True)
             else:
                 ax.set_position([box.x0, box.y0 + box.height * 0.02,
                                 box.width, box.height * 0.80])
                 ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.2),
-                        fancybox=True, ncol=2)
+                        fancybox=True, ncol=2, shadow=True)
             
         if "events" in self.sim_data["data"].keys() and show_events:
             if "completed" in self.sim_data["data"]["events"]:
@@ -951,7 +951,7 @@ class Plotter:
             else:
                 if isinstance(routing, str): fig_title = "Route '{0}' Demand".format(routing)
                 else: fig_title = "OD Demand ('{0}')".format(' → '.join(routing))
-        if self.sim_label != None: fig_title = self.sim_label + fig_title
+        fig_title = self.sim_label + fig_title
         ax.set_title(fig_title, pad=20)
 
         if "events" in self.sim_data["data"].keys() and show_events:
@@ -1321,7 +1321,7 @@ class Plotter:
                         box.width, box.height * 0.98])
 
         ax.legend(loc='upper center', bbox_to_anchor=(0.5, -0.14),
-          fancybox=True, ncol=3)
+          fancybox=True, ncol=3, shadow=True)
 
         fig.tight_layout()
 
@@ -1401,7 +1401,7 @@ class Plotter:
 
         fig_title = "{0}'{1}' Number of Diverted Vehicles".format(self.sim_label, rg_id) if not isinstance(fig_title, str) else fig_title
         ax.set_title(fig_title, pad=20)
-        ax.legend()
+        ax.legend(shadow=True)
 
         if "events" in self.sim_data["data"].keys() and show_events:
             if "completed" in self.sim_data["data"]["events"]:
@@ -1631,50 +1631,128 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def plot_fundamental_diagram(self, edge_ids: list|tuple|str, axes: list|tuple=("density", "flow"), fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_fundamental_diagram(self, edge_ids: list|tuple|str|None=None, x_axis: str="density", y_axis: str="flow", x_percentile: int=100, y_percentile: int=100, separate_edges: bool=False, fig_title: str|None=None, save_fig: str|None=None) -> None:
+        """
+        Plot a fundamental diagram from tracked egde data.
+        :param edge_ids:       Single tracked edge ID or list of IDs
+        :param x_axis:         x-axis variable ('s'|'f'|'d'|'speed'|'flow'|'density')
+        :param y_axis:         y-axis variable ('s'|'f'|'d'|'speed'|'flow'|'density')
+        :param x_percentile:   x-axis value plotting percentile
+        :param y_percentile:   y-axis value plotting percentile
+        :param separate_edges: If True, individual edges are plotted with separate colours
+        :param fig_title:      If given, will overwrite default title
+        :param save_fig:       Output image filename, will show image if not given
+        """
 
         if self.simulation != None:
             self.sim_data = self.simulation.__dict__()
             self.units = self.simulation.units.name
 
-        if isinstance(edge_ids, str): edge_ids = [edge_ids]
-        elif not isinstance(edge_ids, (list, tuple)):
-            desc = "Invalid edge_ids '{0}' type (must be '[str|list|tuple]' not '{1}')".format(edge_ids, type(edge_ids).__name__)
-            raise_error(TypeError, desc)
+        if "edges" not in self.sim_data["data"] or ("edges" in self.sim_data["data"] and len(self.sim_data["data"]) == 0):
+            desc = "No tracked edges found."
+            raise_error(KeyError, desc)
+
+        if edge_ids != None:
+            if isinstance(edge_ids, str): edge_ids = [edge_ids]
+            elif not isinstance(edge_ids, (list, tuple)):
+                desc = "Invalid edge_ids '{0}' type (must be '[str|list|tuple]' not '{1}')".format(edge_ids, type(edge_ids).__name__)
+                raise_error(TypeError, desc)
+        else:
+            edge_ids = list(self.sim_data["data"]["edges"].keys())
+
+        axes = {"S": "speed", "F": "flow", "D": "density"}
+        if not isinstance(x_axis, str) or x_axis.upper() not in ["S", "F", "D", "SPEED", "FLOW", "DENSITY"]:
+            desc = "Invalid x_axis '{0}' (must be ['s'|'f'|'d'|'speed'|'flow'|'density'])."
+            error = TypeError if not isinstance(x_axis, str) else ValueError
+            raise_error(error, desc)
+        elif x_axis in ['s', 'f', 'd']: x_axis = axes[x_axis.upper()]
+
+        if not isinstance(y_axis, str) or y_axis.upper() not in ["S", "F", "D", "SPEED", "FLOW", "DENSITY"]:
+            desc = "Invalid y_axis '{0}' (must be ['s'|'f'|'d'|'speed'|'flow'|'density'])."
+            error = TypeError if not isinstance(y_axis, str) else ValueError
+            raise_error(error, desc)
+        elif y_axis in ['s', 'f', 'd']: y_axis = axes[y_axis.upper()]
 
         fig, ax = plt.subplots(1, 1)
         all_edge_data = self.sim_data["data"]["edges"]
 
+        found_data = False
+        all_x_vals, all_y_vals = [], []
+        all_x_sets, all_y_sets = [], []
+        max_x, max_y = -math.inf, -math.inf
         for edge_id in edge_ids:
             if edge_id not in all_edge_data.keys():
                 desc = "Tracked edge with ID '{0}' not found.".format(edge_id)
                 raise_error(KeyError, desc)
             
-            e_length = all_edge_data[edge_id]["length"]
-            x_points, y_points, e_step_data = [], [], all_edge_data[edge_id]["step_vehicles"]
+            
+            e_step_data = all_edge_data[edge_id]["step_vehicles"]
+            
+            all_x_sets.append([])
+            all_y_sets.append([])
+            x_points, y_points = all_x_sets[-1], all_y_sets[-1]
+
             for step in e_step_data:
                 if len(step) == 0: continue
                 else:
                     n_vehicles = len(step)
-                    density = n_vehicles / e_length
+                    density = n_vehicles / all_edge_data[edge_id]["length"]
                     all_speeds = [v[2] for v in step]
                     avg_speed = sum(all_speeds) / len(all_speeds)
                     if self.units == "UK": avg_speed = convert_units(avg_speed, "mph", "kmph")
                     flow = avg_speed * density
+                    found_data = True
 
-                    for idx, (axis, points_arr) in enumerate(zip(axes, [x_points, y_points])):
-                        match axis.upper():
-                            case "DENSITY":
-                                points_arr.append(density)
-                            case "FLOW":
-                                points_arr.append(flow)
-                            case "SPEED":
-                                points_arr.append(avg_speed)
-                            case _:
-                                desc = "Invalid {0}-axis value '{1}' (must be ['density'|'flow'|'speed'])".format("x" if idx == 0 else "y", axis)
-                                raise_error(ValueError, desc)
+                    for idx, (axis, points_arr) in enumerate(zip([x_axis, y_axis], [x_points, y_points])):
 
-            if len(x_points) > 0 and len(x_points) == len(y_points): plt.scatter(x_points, y_points)
+                        if axis.upper() == 'SPEED':
+                            if idx == 0: x_val = avg_speed
+                            else: y_val = avg_speed
+                        elif axis.upper() == 'FLOW':
+                            if idx == 0: x_val = flow
+                            else: y_val = flow
+                        elif axis.upper() == 'DENSITY':
+                            if idx == 0: x_val = density
+                            else: y_val = density
+                        else:
+                            desc = "Invalid {0}-axis value '{1}' (must be ['density'|'flow'|'speed'])".format("x" if idx == 0 else "y", axis)
+                            raise_error(ValueError, desc)
+
+                        if idx == 0:
+                            points_arr.append(x_val)
+                            all_x_vals.append(x_val)
+                        else:
+                            points_arr.append(y_val)
+                            all_y_vals.append(y_val)
+                    
+        if not found_data:
+            desc = "No data to plot (no vehicles found on tracked edges)."
+            raise_error(KeyError, desc)
+
+        if not separate_edges:
+            all_x_sets = [[x_val for x_set in all_x_sets for x_val in x_set]]
+            all_y_sets = [[y_val for y_set in all_y_sets for y_val in y_set]]
+
+        plotted = False
+
+        outlier_x_lim = np.percentile(all_x_vals, x_percentile)
+        outlier_y_lim = np.percentile(all_y_vals, y_percentile)
+
+        for set_idx, (x_vals, y_vals) in enumerate(zip(all_x_sets, all_y_sets)):
+            new_x_vals, new_y_vals = [], []
+            for x_val, y_val in zip(x_vals, y_vals):
+                if x_val <= outlier_x_lim and y_val <= outlier_y_lim:
+                    new_x_vals.append(x_val)
+                    new_y_vals.append(y_val)
+                    max_x, max_y = max(max_x, x_val), max(max_y, y_val)
+            if len(new_x_vals) > 0 and len(new_y_vals) > 0:
+                plotted = True
+                label = edge_ids[set_idx] if separate_edges else None
+                plt.scatter(new_x_vals, new_y_vals, color=self._get_colour("WHEEL", reset_wheel=not plotted), label=label, zorder=2)
+
+        if not plotted:
+            desc = "No data to plot (no data within percentiles)."
+            raise_error(ValueError, desc)        
 
         dist = "mi" if self.units == "IMPERIAL" else "km"
         sp = "mph" if self.units == "IMPERIAL" else "kmph"
@@ -1683,14 +1761,20 @@ class Plotter:
                         "SPEED": "Average Speed ({0})".format(sp),
                         "FLOW": "Flow (veh/hr)"}
         
-        ax.set_title("{0}-{1} Fundamental Diagram".format(axes[0].title(), axes[1].title()), pad=20)
-        ax.set_xlabel(axis_labels[axes[0].upper()])
-        ax.set_ylabel(axis_labels[axes[1].upper()])
+        if fig_title == None:
+            fig_title = "{0}-{1} Fundamental Diagram".format(x_axis.title(), y_axis.title())
+            fig_title = self.sim_label + fig_title
+            ax.set_title(fig_title, pad=20)
+        ax.set_xlabel(axis_labels[x_axis.upper()])
+        ax.set_ylabel(axis_labels[y_axis.upper()])
+        ax.set_xlim(0, get_axis_lim(max_x))
+        ax.set_ylim(0, get_axis_lim(max_y))
+        ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5, zorder=1)
+        if separate_edges and len(edge_ids) > 1: ax.legend(shadow=True)
 
         fig.tight_layout()
 
         self._display_figure(save_fig)
-
 
     def _get_colour(self, colour: str|int|None=None, reset_wheel: bool=False) -> str:
 

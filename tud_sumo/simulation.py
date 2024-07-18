@@ -16,7 +16,11 @@ class Simulation:
         :param scenario_desc: Simulation scenario description, saved along with all files
         """
 
-        path_tools = os.path.join(os.environ.get("SUMO_HOME"), 'tools')
+        if "SUMO_HOME" in os.environ:
+            path_tools = os.path.join(os.environ.get("SUMO_HOME"), 'tools')
+        else:
+            desc = "Environment SUMO_HOME variable not set."
+            raise_error(EnvironmentError, desc)
 
         if path_tools in sys.path: pass
         else: sys.path.append(path_tools)
@@ -39,7 +43,7 @@ class Simulation:
         self._all_tls = []
 
         self._manual_flow = False
-        self._demand_sd = 1/3
+        self._demand_sd = None
         self._demand_headers = None
         self._demand_arrs = None
         self._man_flow_id = None
@@ -94,7 +98,7 @@ class Simulation:
 
         if config_file == net_file == None:
             desc = "Either config or network file required."
-            raise_error(ValueError, desc, self.curr_step)
+            raise_error(ValueError, desc)
         
         if config_file != None:
             if config_file.endswith(".sumocfg"):
@@ -102,7 +106,7 @@ class Simulation:
                 if self.scenario_name == None: self.scenario_name = get_scenario_name(config_file)
             else:
                 desc = "Invalid config file extension."
-                raise_error(ValueError, desc, self.curr_step)
+                raise_error(ValueError, desc)
         else:
             sumoCMD += ["-n", net_file]
             if self.scenario_name == None: self.scenario_name = get_scenario_name(net_file)
@@ -118,31 +122,35 @@ class Simulation:
                     raise_error(ValueError, desc)
                 elif seed.upper() == "RANDOM":
                     sumoCMD.append("--random")
+                    self._seed = "random"
                 else:
                     sumoCMD += ["--seed", seed]
                     set_seed(int(seed))
                     np.random.seed(int(seed))
+                    self._seed = int(seed)
+
             elif isinstance(seed, int):
                 sumoCMD += ["--seed", str(seed)]
                 set_seed(seed)
                 np.random.seed(seed)
+                self._seed = seed
             else:
                 desc = "Invalid seed '{0}' type (must be 'str', not '{1}').".format(seed, type(seed).__name__)
-                raise_error(TypeError, desc, self.curr_step)
-        
-        self._seed = int(seed) if seed.upper() != "RANDOM" else seed
+                raise_error(TypeError, desc)
+        else:
+            self._seed = "random"
  
         if isinstance(units, str):
             if units.upper() in ["METRIC", "IMPERIAL", "UK"]:
                 self.units = Units(["METRIC", "IMPERIAL", "UK"].index(units.upper())+1)
             else:
                 desc = "Invalid simulation units '{0}' (must be ['METRIC'|'IMPERIAL'|'UK']).".format(units)
-                raise_error(ValueError, desc, self.curr_step)
+                raise_error(ValueError, desc)
 
         elif units in [1, 2, 3]: self.units = Units(units)
         else:
             desc = "Invalid simulation units '{0}' (must be ['METRIC'|'IMPERIAL'|'UK']).".format(units)
-            raise_error(ValueError, desc, self.curr_step)
+            raise_error(ValueError, desc)
 
         traci.start(sumoCMD)
         self._running = True
@@ -244,7 +252,7 @@ class Simulation:
                 if os.path.exists(csv_file):
                     with open(csv_file, "r") as fp:
                         valid_cols = ["origin", "destination", "route_id", "start_time", "end_time", "start_step", "end_step",
-                                  "demand", "number", "vehicle_types", "vehicle_type_dists", "initial_speed", "origin_lane"]
+                                  "demand", "number", "vehicle_types", "vehicle_type_dists", "initial_speed", "origin_lane", "insertion_sd"]
                         demand_idxs = {}
                         reader = csv.reader(fp)
                         for idx, row in enumerate(reader):
@@ -290,6 +298,9 @@ class Simulation:
                                 if "origin_lane" in row:
                                     demand_idxs["origin_lane"] = row.index("vehiorigin_lanecle_types")
 
+                                if "insertion_sd" in row:
+                                    demand_idxs["insertion_sd"] = row.index("insertion_sd")
+
                             else:
                                 
                                 if "route_id" in demand_idxs: routing = row[demand_idxs["route_id"]]
@@ -325,7 +336,11 @@ class Simulation:
                                     if origin_lane.isdigit(): origin_lane = int(origin_lane)
                                 else: origin_lane = "best"
 
-                                self.add_demand(routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane)
+                                if "insertion_sd" in demand_idxs:
+                                    insertion_sd = float(row[demand_idxs["insertion_sd"]])
+                                else: insertion_sd = 1/3
+
+                                self.add_demand(routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, insertion_sd)
                                 
                 else:
                     desc = "Demand file '{0}' not found.".format(csv_file)
@@ -339,7 +354,7 @@ class Simulation:
 
         self._manual_flow = True
 
-    def add_demand(self, routing: str|list|tuple, step_range: list|tuple, demand: int|float, vehicle_types: str|list|tuple|None=None, vehicle_type_dists: list|tuple|None=None, initial_speed: str|int|float="max", origin_lane: str|int|float="best"):
+    def add_demand(self, routing: str|list|tuple, step_range: list|tuple, demand: int|float, vehicle_types: str|list|tuple|None=None, vehicle_type_dists: list|tuple|None=None, initial_speed: str|int|float="max", origin_lane: str|int|float="best", insertion_sd: float=1/3):
         """
         Adds traffic flow demand for a specific route and time.
         :param routing: Either a route ID or OD pair of edge IDs
@@ -388,8 +403,8 @@ class Simulation:
                     if not self.vehicle_type_exists(type_id):
                         desc = "Unknown vehicle type ID '{0}' in vehicle_types.".format(type_id)
                         raise_error(KeyError, desc, self.curr_step)
-            elif isinstance(vehicle_types, str) and not self.vehicle_type_exists(type_id):
-                desc = "Unknown vehicle type ID '{0}' in vehicle_types.".format(type_id)
+            elif isinstance(vehicle_types, str) and not self.vehicle_type_exists(vehicle_types):
+                desc = "Unknown vehicle type ID '{0}' in vehicle_types.".format(vehicle_types)
                 raise_error(KeyError, desc, self.curr_step)
         
         if vehicle_type_dists != None and vehicle_types == None:
@@ -409,12 +424,17 @@ class Simulation:
                 desc = "Invalid vehicle_type_dists '{0}' type (must only contain values of type 'float').".format(vehicle_type_dists)
                 raise_error(TypeError, desc, self.curr_step)
 
+        if not isinstance(insertion_sd, (float, int)):
+            desc = "Invalid insertion_sd '{0}' type (must be [int|float], not '{1}').".format(insertion_sd, type(insertion_sd).__name__)
+            raise_error(TypeError, desc, self.curr_step)
+
         if not self._manual_flow:
             self._manual_flow = True
-            self._demand_headers = ["routing", "step_range", "veh/step", "vehicle_types", "vehicle_type_dists", "init_speed", "origin_lane"]
+            self._demand_headers = ["routing", "step_range", "veh/step", "vehicle_types", "vehicle_type_dists", "init_speed", "origin_lane", "insertion_sd"]
             self._demand_arrs, self._man_flow_id = [], 0
+            self._demand_sd = 1/3
 
-        self._demand_arrs.append([routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane])
+        self._demand_arrs.append([routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, insertion_sd])
 
     def _add_demand_vehicles(self) -> None:
         """
@@ -434,10 +454,12 @@ class Simulation:
                 vehicle_type_dists = demand_arr[4]
                 initial_speed = demand_arr[5]
                 origin_lane = demand_arr[6]
+                insertion_sd = demand_arr[7]
                 
                 added = 0
                 if veh_per_step < 1: n_vehicles = 1 if random() < veh_per_step else 0
-                else: n_vehicles = round(np.random.normal(veh_per_step, veh_per_step * self._demand_sd, 1)[0])
+                else: n_vehicles = round(np.random.normal(veh_per_step, veh_per_step * insertion_sd, 1)[0])
+                n_vehicles = max(0, n_vehicles)
 
                 while added < n_vehicles:
                     if isinstance(vehicle_types, list):
@@ -679,10 +701,14 @@ class Simulation:
             all_data["data"]["trips"] = {"incomplete": {}, "completed": {}}
             if self._get_individual_vehicle_data: all_data["data"]["all_vehicles"] = []
             if self._scheduler != None: all_data["data"]["events"] = {}
-        else: 
-            prev_steps = set([len(data_arr) for data_arr in prev_data["data"]["vehicles"].values()] +
-                            [len(detector_data["speeds"]) for detector_data in prev_data["data"]["detectors"].values()] +
-                            [len(detector_data["vehicle_counts"]) for detector_data in prev_data["data"]["detectors"].values()])
+        else:
+
+            lens = [len(data_arr) for data_arr in prev_data["data"]["vehicles"].values()]
+            if len(detector_list) > 0:
+                lens += [len(detector_data["speeds"]) for detector_data in prev_data["data"]["detectors"].values()]
+                lens += [len(detector_data["vehicle_counts"]) for detector_data in prev_data["data"]["detectors"].values()]
+
+            prev_steps = set(lens)
             
             if len(prev_steps) != 1:
                 desc = "Invalid prev_data (different length arrays)."
@@ -710,18 +736,20 @@ class Simulation:
             for controller in self.controllers.values(): controller.update()
             for edge in self.tracked_edges.values(): edge.update()
 
-            if len(all_data["data"]["detectors"]) == 0:
-                for detector_id in detector_list:
-                    all_data["data"]["detectors"][detector_id] = self.available_detectors[detector_id]
-                    all_data["data"]["detectors"][detector_id].update({"speeds": [], "vehicle_counts": [], "vehicle_ids": [], "occupancies": []})
-                all_data["data"]["vehicles"] = {"no_vehicles": [], "no_waiting": [], "tts": [], "delay": []}
+            all_data["data"]["vehicles"] = {"no_vehicles": [], "no_waiting": [], "tts": [], "delay": []}
 
-            for detector_id in last_step_data["detectors"].keys():
-                if detector_id not in all_data["data"]["detectors"].keys():
-                    desc = "Unrecognised detector ID found ('{0}').".format(detector_id)
-                    raise_error(KeyError, desc, self.curr_step)
-                for data_key, data_val in last_step_data["detectors"][detector_id].items():
-                    all_data["data"]["detectors"][detector_id][data_key].append(data_val)
+            if "detectors" in all_data["data"]:
+                if len(all_data["data"]["detectors"]) == 0:
+                    for detector_id in detector_list:
+                        all_data["data"]["detectors"][detector_id] = self.available_detectors[detector_id]
+                        all_data["data"]["detectors"][detector_id].update({"speeds": [], "vehicle_counts": [], "vehicle_ids": [], "occupancies": []})
+
+                for detector_id in last_step_data["detectors"].keys():
+                    if detector_id not in all_data["data"]["detectors"].keys():
+                        desc = "Unrecognised detector ID found ('{0}').".format(detector_id)
+                        raise_error(KeyError, desc, self.curr_step)
+                    for data_key, data_val in last_step_data["detectors"][detector_id].items():
+                        all_data["data"]["detectors"][detector_id][data_key].append(data_val)
 
             for data_key, data_val in last_step_data["vehicles"].items():
                 all_data["data"]["vehicles"][data_key].append(data_val)
