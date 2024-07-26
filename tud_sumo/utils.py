@@ -14,7 +14,7 @@ time_desc = {"s": "Seconds", "m": "Minutes", "hr": "Hours"}
 traci_constants = {"vehicle": {
                                 "speed": tc.VAR_SPEED, "is_stopped": tc.VAR_SPEED, "max_speed": tc.VAR_MAXSPEED, "acceleration": tc.VAR_ACCELERATION,
                                 "position": tc.VAR_POSITION, "altitude": tc.VAR_POSITION3D, "heading": tc.VAR_ANGLE, "edge_id": tc.VAR_ROAD_ID,
-                                "lane_idx": tc.VAR_LANE_INDEX, "route_id": tc.VAR_ROUTE_ID, "route_idx": tc.VAR_ROUTE_INDEX, "route_edges": tc.VAR_ROUTE},
+                                "lane_idx": tc.VAR_LANE_INDEX, "route_id": tc.VAR_ROUTE_ID, "route_idx": tc.VAR_ROUTE_INDEX},
                    "detector": {
                                 "vehicle_count": tc.LAST_STEP_VEHICLE_NUMBER, "vehicle_ids": tc.LAST_STEP_VEHICLE_ID_LIST, "lsm_speed": tc.LAST_STEP_MEAN_SPEED,
                                 "halting_no": tc.LAST_STEP_VEHICLE_HALTING_NUMBER, "lsm_occupancy": tc.LAST_STEP_OCCUPANCY, "last_detection": tc.LAST_STEP_TIME_SINCE_DETECTION},
@@ -44,20 +44,6 @@ def raise_warning(desc, curr_sim_step=None):
     warning_msg = "(WARNING) {0}: {1}".format(caller, desc)
     if curr_sim_step != None: warning_msg = "(step {0}) ".format(curr_sim_step) + warning_msg
     print(warning_msg)
-
-"""
-def convert_time_units(time_vals, unit, step_len, keep_arr=False):
-    if not isinstance(time_vals, list): time_vals = [time_vals]
-    if unit == "s" and step_len != None:
-        time_vals = [val * step_len for val in time_vals]
-    elif unit == "m" and step_len != None:
-        time_vals = [(val * step_len)/60 for val in time_vals]
-    elif unit == "hr" and step_len != None:
-        time_vals = [(val * step_len)/3600 for val in time_vals]
-
-    if len(time_vals) == 1 and not keep_arr: return time_vals[0]
-    else: return time_vals
-"""
 
 def convert_units(values, orig_units, new_units, step_length=1, keep_arr=False):
 
@@ -135,12 +121,15 @@ def get_cumulative_arr(arr: list, start: int=0) -> list:
 def get_scenario_name(filepath: str) -> str:
     """
     Get scenario name from filepath.
-    :param filepath: '.sumocfg' or '.neteditcfg' filename
+    :param filepath: SUMO filename
     :return str:     Scenario name
     """
     cfg_file = filepath.split('/')[-1]
     if cfg_file.endswith('.sumocfg'): cfg_file = cfg_file.removesuffix('.sumocfg')
     elif cfg_file.endswith('.neteditcfg'): cfg_file = cfg_file.removesuffix('.neteditcfg')
+    elif cfg_file.endswith('.add.xml'): cfg_file = cfg_file.removesuffix('.add.xml')
+    elif cfg_file.endswith('.rou.xml'): cfg_file = cfg_file.removesuffix('.rou.xml')
+    elif cfg_file.endswith('.net.xml'): cfg_file = cfg_file.removesuffix('.net.xml')
     return cfg_file
 
 def load_params(parameters: str|dict, params_name: str|None = None, step: int|None = None) -> dict:

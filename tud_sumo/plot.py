@@ -28,7 +28,7 @@ class Plotter:
     def __init__(self, simulation: Simulation|str, sim_label: str|None=None, time_unit: str="seconds", save_fig_loc: str="", save_fig_dpi: int=600, overwrite_figs: bool=True) -> None:
         """
         :param simulation:     Either simulation object, sim_data dict or sim_data filepath
-        :param sim_label:      Simulation or scenario label added to the beginning of all plot titles
+        :param sim_label:      Simulation or scenario label added to the beginning of all plot titles (set to 'scenario' for scenario name)
         :param time_unit:      Plotting time unit used for all plots (must be ['steps'|'seconds'|'minutes'|'hours'])
         :param save_fig_loc:   Figure filepath when saving (defaults to current file)
         :param save_fig_dpi:   Figure dpi when saving (defaults to 600dpi)
@@ -215,7 +215,7 @@ class Plotter:
         ax.set_xlabel(default_labels["sim_time"])
         fig.tight_layout()
         ax.legend(title="Vehicle Types", fontsize="small", shadow=True)
-        ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+        self._add_grid(ax, None)
 
         if "events" in self.sim_data["data"].keys() and show_events:
             if "completed" in self.sim_data["data"]["events"]:
@@ -465,7 +465,7 @@ class Plotter:
         ax.set_ylim([0, get_axis_lim(max_r)])
         ax.axhline(max_r, label="Min/Max Rate", color=self.ROOD, linestyle="--", zorder=1)
         ax.axhline(min_r, color=self.ROOD, linestyle="--", zorder=2)
-        ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+        self._add_grid(ax, None)
         if yax_labels: ax.set_ylabel("Metering Rate (veh/hr)")
         if xax_labels: ax.set_xlabel(default_labels["sim_time"])
         fig_title = "{0}'{1}' Metering Rate".format(self.sim_label, rm_id) if not isinstance(fig_title, str) else fig_title
@@ -600,7 +600,7 @@ class Plotter:
 
                 ax.set_xlim(xlim)
                 ax.set_ylim([0, get_axis_lim(avg_data)])
-                ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+                self._add_grid(ax, None)
                 if rm_idx == 0: ax.set_ylabel(default_labels[data_key])
                 if len(rm_ids) == 1 or data_key == data_keys[-1]: ax.set_xlabel(default_labels["sim_time"])
                 
@@ -822,7 +822,7 @@ class Plotter:
         ax.set_ylabel(default_labels[data_key])
         ax.set_xlim([x_vals[0], x_vals[-1]])
         ax.set_ylim([0, get_axis_lim(y_vals)])
-        ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+        self._add_grid(ax, None)
 
         if "events" in self.sim_data["data"].keys() and show_events:
             if "completed" in self.sim_data["data"]["events"]:
@@ -880,7 +880,7 @@ class Plotter:
         ax.set_xlim([x_vals[0], x_vals[-1]])
         if data_key == "occupancies": ax.set_ylim([0, 100])
         else: ax.set_ylim([0, get_axis_lim(y_vals)])
-        ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+        self._add_grid(ax, None)
 
         if "events" in self.sim_data["data"].keys() and show_events:
             if "completed" in self.sim_data["data"]["events"]:
@@ -890,22 +890,41 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def plot_od_demand(self, routing: str|list|tuple, plot_sim_dur=True, show_events: bool=True, line_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_od_demand(self, routing: str|list|tuple|None=None, plot_sim_dur: bool=True, show_events: bool=True, line_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plots traffic demand added with TUD-SUMO.
-        :param routing: Either route ID, 
+        :param routing:      Either string (route ID or 'all'), OD pair ('A', 'B') or None (defaulting to all)
+        :param plot_sim_dur: If False, only previous demand in the simulation is plotted, otherwise all demand
+        :param show_events:  Bool denoting whether to plot when events occur
+        :param line_colour:  Line colour for plot (defaults to TUD 'blauw')
+        :param fig_title:    If given, will overwrite default title
+        :param save_fig:     Output image filename, will show image if not given
         """
 
+        demand_arrs = None
         if self.simulation != None:
             self.sim_data = self.simulation.__dict__()
             self.units = self.simulation.units.name
+            
+            demand_data = self.simulation.get_demand_table()
+            if demand_data != None:
+                demand_arrs = demand_data[1]
+
+                step = self.simulation.step_length
+                plot_sim_dur = False
+        else:
+            if "demand" in self.sim_data["data"]:
+                demand_arrs = self.sim_data["data"]["demand"]["table"]
+
+                step, start, end = self.sim_data["step_len"], self.sim_data["start"], self.sim_data["end"]
+        
+        if demand_arrs == None:
+            desc = "No demand data to plot."
+            raise_error(KeyError, desc)
 
         fig, ax = plt.subplots(1, 1)
-        demand_arrs = self.sim_data["data"]["demand"]["table"]
         
-        step = self.sim_data["step_len"]
-        if plot_sim_dur: start, end = self.sim_data["start"], self.sim_data["end"]
-        else:
+        if not plot_sim_dur:
             start, end = 0, -math.inf
             for demand_arr in demand_arrs:
                 end = max(end, demand_arr[1][1])
@@ -919,14 +938,15 @@ class Plotter:
             arr_routing, vehs_per_step = demand_arr[0], demand_arr[2]
             arr_start, arr_end = int(demand_arr[1][0]), int(demand_arr[1][1])
 
-            if isinstance(routing, str) and not isinstance(arr_routing, str):
-                if routing != "all": continue
+            if routing != None:
+                if isinstance(routing, str) and not isinstance(arr_routing, str):
+                    if routing != "all": continue
 
-            elif isinstance(routing, str) and isinstance(arr_routing, str):
-                if routing != arr_routing and routing != "all": continue
-                
-            elif isinstance(routing, (list, tuple)) and isinstance(arr_routing, (list, tuple)):
-                if routing[0] != arr_routing[0] or routing[1] != arr_routing[1]: continue
+                elif isinstance(routing, str) and isinstance(arr_routing, str):
+                    if routing != arr_routing and routing != "all": continue
+                    
+                elif isinstance(routing, (list, tuple)) and isinstance(arr_routing, (list, tuple)):
+                    if routing[0] != arr_routing[0] or routing[1] != arr_routing[1]: continue
 
             if arr_start > end or arr_end < start: continue
             if include:
@@ -938,25 +958,24 @@ class Plotter:
             desc = "Unknown routing '{0}' (no demand found).".format(routing)
             raise_error(KeyError, desc)
 
-        #demand_vals = [val * 3600 for val in demand_vals]
-
         ax.plot(time_steps, demand_vals, color=self._get_colour(line_colour))
         ax.set_ylabel("Demand (vehicles/hour)")
         ax.set_xlabel(default_labels["sim_time"])
         ax.set_xlim([convert_units(start, "steps", self.time_unit, step), convert_units(end, "steps", self.time_unit, step)])
         ax.set_ylim([0, get_axis_lim(demand_vals)])
-        ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+        self._add_grid(ax, None)
         if fig_title == None:
-            if routing == "all": fig_title = "Network-wide Demand"
+            if routing == "all" or routing == None: fig_title = "Network-wide Demand"
             else:
                 if isinstance(routing, str): fig_title = "Route '{0}' Demand".format(routing)
                 else: fig_title = "OD Demand ('{0}')".format(' → '.join(routing))
         fig_title = self.sim_label + fig_title
         ax.set_title(fig_title, pad=20)
 
-        if "events" in self.sim_data["data"].keys() and show_events:
-            if "completed" in self.sim_data["data"]["events"]:
-                self._plot_event(ax)
+        if self.sim_data != None and "data" in self.sim_data:
+            if "events" in self.sim_data["data"].keys() and show_events:
+                if "completed" in self.sim_data["data"]["events"]:
+                    self._plot_event(ax)
         
         fig.tight_layout()
 
@@ -1179,7 +1198,7 @@ class Plotter:
         ax.plot(x_vals, outflows, color=self.ROOD, label="Outflow", zorder=4)
         ax.set_xlim([x_vals[0], x_vals[-1]])
         ax.set_ylim([0, get_axis_lim(inflows)])
-        ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+        self._add_grid(ax, None)
         ax.set_xlabel(default_labels["sim_time"])
         ax.set_ylabel("Cumulative No. of Vehicles")
         ax.legend(loc='lower right', shadow=True)
@@ -1370,7 +1389,7 @@ class Plotter:
         ax.set_ylim([0, y_lim])
         ax.set_xlabel(default_labels["sim_time"])
         ax.set_ylabel("No. of Diverted Vehicles")
-        ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5)
+        self._add_grid(ax, None)
 
         active_times = rg_data["activation_times"]
         label = "RG Activated"
@@ -1508,7 +1527,7 @@ class Plotter:
             if len(edge_ids) == 0: e_label = "Edge '{0}'".format(edge_ids[0])
             elif upstream_at_top: e_label = "Edges '{0}' - '{1}'".format(edge_ids[-1], edge_ids[0])
             else: e_label = "Edges '{0}' - '{1}'".format(edge_ids[0], edge_ids[-1])
-            fig_title = "{0}{1} Vehicle Speeds and Positions".format(self.sim_label, e_label)
+            fig_title = "{0}{1}".format(self.sim_label, e_label)
 
         ax.set_title(fig_title, pad=20)
 
@@ -1516,10 +1535,11 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def plot_trajectories(self, edge_ids: list|tuple, vehicle_pct: float=1, rnd_seed: int|None=None, time_range: list|tuple|None=None, show_events: bool=True, line_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_trajectories(self, edge_ids: list|tuple, lane_idx: int|None=None, vehicle_pct: float=1, rnd_seed: int|None=None, time_range: list|tuple|None=None, show_events: bool=True, line_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot vehicle trajectory data from tracked edge data.
         :param edge_ids:    Single tracked egde ID or list of IDs
+        :param lane_idx:    Lane index for vehicles on all edges
         :param vehicle_pct: Percent of vehicles plotted (defaults to all)
         :param rnd_seed:    When vehicle_pct < 1, vehicles are selected randomly with rnd_seed
         :param time_range:  Plotting time range (in plotter class units)
@@ -1547,15 +1567,21 @@ class Plotter:
                     desc = "Edge ID '{0}' not found.".format(edge_id)
                     raise_error(KeyError, desc)
 
-        x_lim_time_range = time_range != None
         if time_range == None: time_range = [-math.inf, math.inf]
+        x_lim, y_lim = [math.inf, -math.inf], [math.inf, -math.inf]
+
+        if self.units in ["IMPERIAL"]:
+            orig_units, new_units = "miles", "miles" if total_len > 1 else "feet"
+        elif self.units in ["METRIC", "UK"]:
+            orig_units, new_units = "kilometres", "kilometres" if total_len > 1 else "metres"
 
         seed(rnd_seed)
-        line_data, edge_offset, ignore_list = {}, 0, set([])
+
+        included_vehs, skipped_vehs = set([]), set([])
         step_length = self.sim_data["step_len"]
+        all_step_vehicle_data, edge_offset = [], 0
 
         for edge_idx, edge_id in enumerate(edge_ids):
-
             edge_data = self.sim_data["data"]["edges"][edge_id]
 
             step_vehicle_data, edge_length = edge_data["step_vehicles"], edge_data["length"]
@@ -1563,63 +1589,100 @@ class Plotter:
 
             curr_step, first_step = start, True
 
-            for step_vehicles in step_vehicle_data:
-                
+            for step_data in step_vehicle_data:
+
                 curr_time = convert_units(curr_step, "steps", self.time_unit, step_length)
-                if curr_time >= time_range[0] and curr_time <= time_range[1]:
-                    
-                    for vehicle_data in step_vehicles:
-                        vehicle_id, vehicle_pos, vehicle_lane = vehicle_data[0], vehicle_data[1], vehicle_data[3]
-                    
-                        if edge_idx == 0 or first_step:
-                            if vehicle_id not in line_data and vehicle_id not in ignore_list:
-                                if random() <= vehicle_pct:
-                                    line_data[vehicle_id] = {'x': [], 'y': []}
-                                else: ignore_list.add(vehicle_id)
-                        
-                        if vehicle_id in line_data.keys():
-                            line_data[vehicle_id]['x'].append(curr_step)
-                            line_data[vehicle_id]['y'].append((vehicle_pos * edge_length) + edge_offset)
-
-                    first_step = False
-
-                elif curr_time > time_range[1]:
-                    break
                 
-                curr_step += 1
+                if curr_time < time_range[0] or curr_time > time_range[1]:
+                    curr_step += 1
+                    continue
 
-            edge_offset += edge_length
+                for vehicle_data in step_data:
+                    vehicle_id, vehicle_pos, vehicle_lane = vehicle_data[0], vehicle_data[1], vehicle_data[3]
+                    
+                    if edge_idx == 0 or first_step:
+                        if vehicle_id not in included_vehs and vehicle_id not in skipped_vehs:
+                            if random() <= vehicle_pct: included_vehs.add(vehicle_id)
+                            else: skipped_vehs.add(vehicle_id)
+                    
+                    if vehicle_id in included_vehs:
+                        dist_val = (vehicle_pos * edge_length) + edge_offset
+                        all_step_vehicle_data.append([vehicle_id, curr_time, dist_val, vehicle_lane])
+
+                first_step = False
+                curr_step += 1
             
-        if self.units in ["IMPERIAL"]:
-            orig_units, new_units = "miles", "miles" if total_len > 1 else "feet"
-        elif self.units in ["METRIC", "UK"]:
-            orig_units, new_units = "kilometres", "kilometres" if total_len > 1 else "metres"
-        x_label, y_label = default_labels["sim_time"], default_labels[new_units]
+            edge_offset += edge_length
+        
+        all_step_vehicle_data = sorted(all_step_vehicle_data, key=lambda x: x[1])
 
         fig, ax = plt.subplots(1, 1)
-        
-        lines = []
-        x_lim, y_lim = [math.inf, -math.inf], [math.inf, -math.inf]
-        for veh_data in line_data.values():
-            x = convert_units(veh_data['x'], "steps", self.time_unit, step_length, True)
-            if not x_lim_time_range: x_lim = [min(x_lim[0], min(x)), max(x_lim[1], max(x))]
-            
-            y = convert_units(veh_data['y'], orig_units, new_units, keep_arr=True)
-            y_lim = [0, max(y_lim[1], max(y))]
-            
-            line = ax.plot(x, y, color=self._get_colour(line_colour), linewidth=0.5)
-            lines.append(line)
+        plotted = False
 
-        if len(lines) == 0:
+        if len(all_step_vehicle_data) == 0:
             desc = "No vehicles found within range '[{0}]'. ".format(", ".join([str(val) for val in time_range]))
             raise_error(ValueError, desc)
 
-        if x_lim_time_range: ax.set_xlim(time_range)
-        else: ax.set_xlim(x_lim)
+        curr_time = all_step_vehicle_data[0][1]
+        line_x_vals, line_y_vals = {}, {}
+        entry_x, entry_y, exit_x, exit_y = [], [], [], []
+        for vehicle_data in all_step_vehicle_data:
+            vehicle_id, vehicle_time, vehicle_pos, vehicle_lane = vehicle_data
+            vehicle_pos = convert_units(vehicle_pos, orig_units, new_units)
+
+            if lane_idx == None or vehicle_lane == lane_idx:
+                if vehicle_id not in line_x_vals and vehicle_id not in line_y_vals:
+                    line_x_vals[vehicle_id] = []
+                    line_y_vals[vehicle_id] = []
+
+                    if lane_idx != None and vehicle_time > x_lim[0]:
+                        entry_x.append(vehicle_time)
+                        entry_y.append(vehicle_pos)
+                
+                line_x_vals[vehicle_id].append(vehicle_time)
+                line_y_vals[vehicle_id].append(vehicle_pos)
+
+                x_lim = [min(x_lim[0], vehicle_time), max(x_lim[1], vehicle_time)]
+                y_lim = [min(y_lim[0], vehicle_pos), max(y_lim[1], vehicle_pos)]
+            
+            elif vehicle_id in line_x_vals and vehicle_id in line_y_vals:
+                if len(line_x_vals[vehicle_id]) > 1:
+                    ax.plot(line_x_vals[vehicle_id], line_y_vals[vehicle_id], color=self._get_colour(line_colour), linewidth=0.5, zorder=1)
+                    
+                    if lane_idx != None and line_x_vals[vehicle_id][-1] < x_lim[1]:
+                        exit_x.append(line_x_vals[vehicle_id][-1])
+                        exit_y.append(line_y_vals[vehicle_id][-1])
+
+                del line_x_vals[vehicle_id]
+                del line_y_vals[vehicle_id]
+
+                plotted = True
+
+        for vehicle_id in line_x_vals.keys():
+            if len(line_x_vals[vehicle_id]) > 1:
+                ax.plot(line_x_vals[vehicle_id], line_y_vals[vehicle_id], color=self._get_colour(line_colour), linewidth=0.5, zorder=1)
+                if lane_idx != None and line_x_vals[vehicle_id][-1] < x_lim[1]:
+                    exit_x.append(line_x_vals[vehicle_id][-1])
+                    exit_y.append(line_y_vals[vehicle_id][-1])
+            plotted = True
+
+        if not plotted:
+            desc = "No vehicles found on lane '{0}'. ".format(lane_idx)
+            raise_error(ValueError, desc)
+        
+        if lane_idx != None:
+            ax.scatter(entry_x, entry_y, color='lightgrey', marker='+', s=30, zorder=2)
+            ax.scatter(exit_x, exit_y, color='lightgrey', marker='x', s=20, zorder=2)
+
+        x_label, y_label = default_labels["sim_time"], default_labels[new_units]
+
+        ax.set_xlim(x_lim)
         ax.set_ylim(y_lim)
         ax.set_xlabel(x_label)
         ax.set_ylabel(y_label)
-        if fig_title == None: fig_title = "Vehicle Trajectories"
+        if fig_title == None:
+            fig_title = "Vehicle Trajectories"
+            if lane_idx != None: fig_title += " (Lane {0})".format(lane_idx+1)
         fig_title = self.sim_label + fig_title
         ax.set_title(fig_title, pad=20)
 
@@ -1769,13 +1832,16 @@ class Plotter:
         ax.set_ylabel(axis_labels[y_axis.upper()])
         ax.set_xlim(0, get_axis_lim(max_x))
         ax.set_ylim(0, get_axis_lim(max_y))
-        ax.grid(True, 'both', color='grey', linestyle='-', linewidth=0.5, zorder=1)
+        self._add_grid(ax)
         if separate_edges and len(edge_ids) > 1: ax.legend(shadow=True)
 
         fig.tight_layout()
 
         self._display_figure(save_fig)
 
+    def _add_grid(self, ax, zorder=1):
+        ax.grid(True, 'both', color='grey', linestyle='dashed', linewidth=0.5, zorder=zorder)
+        
     def _get_colour(self, colour: str|int|None=None, reset_wheel: bool=False) -> str:
 
         if reset_wheel: self._next_colour_idx = 0

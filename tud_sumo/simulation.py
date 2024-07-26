@@ -20,7 +20,7 @@ class Simulation:
             path_tools = os.path.join(os.environ.get("SUMO_HOME"), 'tools')
         else:
             desc = "Environment SUMO_HOME variable not set."
-            raise_error(EnvironmentError, desc)
+            raise_error(SimulationError, desc)
 
         if path_tools in sys.path: pass
         else: sys.path.append(path_tools)
@@ -28,11 +28,25 @@ class Simulation:
         self.curr_step = 0
         self.step_length = None
         self.units = Units(1)
-        self.scenario_name = scenario_name
-        self.scenario_desc = scenario_desc
+        
+        if isinstance(scenario_name, (str, type(None))):
+            self.scenario_name = scenario_name
+        else:
+            desc = "Invalid scenario_name '{0}' type (must be [str|None], not '{1}').".format(scenario_name, type(scenario_name).__name__)
+            raise_error(TypeError, desc)
+
+        if isinstance(scenario_desc, (str, type(None))):
+            self.scenario_desc = scenario_desc
+        else:
+            desc = "Invalid scenario_desc type (must be [str|None], not '{1}').".format(scenario_name, type(scenario_name).__name__)
+            raise_error(TypeError, desc)
+        
         self._seed = None
         self._running = False
         self._gui = False
+        self._pbar = None
+        self._pbar_length = None
+        self._start_called = False
 
         self._all_data = None
 
@@ -43,7 +57,6 @@ class Simulation:
         self._all_tls = []
 
         self._manual_flow = False
-        self._demand_sd = None
         self._demand_headers = None
         self._demand_arrs = None
         self._man_flow_id = None
@@ -76,23 +89,24 @@ class Simulation:
 
     def __dict__(self): return {} if self._all_data == None else self._all_data
 
-    def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, cmd_options: list|None = None, units: str|int = 1, get_individual_vehicle_data: bool = True, automatic_subscriptions: bool = True, suppress_warnings: bool = False, ignore_TraCI_err: bool = False, seed: str = "random", gui: bool = False) -> None:
+    def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, cmd_options: list|None = None, units: str|int = 1, get_individual_vehicle_data: bool = True, automatic_subscriptions: bool = True, suppress_warnings: bool = False, suppress_traci_warnings: bool = True, seed: str = "random", gui: bool = False) -> None:
         """
         Intialises SUMO simulation.
-        :param config_file: Location of '.sumocfg' file (can be given instead of net_file)
-        :param net_file:    Location of '.net.xml' file (can be given instead of config_file)
-        :param route_file:  Location of '.rou.xml' route file
-        :param add_file:    Location of '.add.xml' additional file
-        :param cmd_options: List of any other command line options
-        :param units:       Data collection units [1 (metric) | 2 (IMPERIAL) | 3 (UK)] (defaults to 'metric')
+        :param config_file:                 Location of '.sumocfg' file (can be given instead of net_file)
+        :param net_file:                    Location of '.net.xml' file (can be given instead of config_file)
+        :param route_file:                  Location of '.rou.xml' route file
+        :param add_file:                    Location of '.add.xml' additional file
+        :param cmd_options:                 List of any other command line options
+        :param units:                       Data collection units [1 (metric) | 2 (IMPERIAL) | 3 (UK)] (defaults to 'metric')
         :param get_individual_vehicle_data: Denotes whether to get individual vehicle data (set to False to improve performance)
-        :param automatic_subscriptions: Denotes whether to automatically subscribe to commonly used vehicle data (speed and position, defaults to True)
-        :param suppress_warnings: Suppress simulation warnings
-        :param ignore_TraCI_err: If true and a fatal traCI error occurs, the simulation ends but the program continues to run
-        :param seed:        Either int to be used as seed, or random.random()/random.randint(), where a random seed is used
-        :param gui:         Bool denoting whether to run GUI
+        :param automatic_subscriptions:     Denotes whether to automatically subscribe to commonly used vehicle data (speed and position, defaults to True)
+        :param suppress_warnings:           Suppress simulation warnings
+        :param suppress_traci_warnings:     Suppress warnings from TraCI
+        :param seed:                        Either int to be used as seed, or random.random()/random.randint(), where a random seed is used
+        :param gui:                         Bool denoting whether to run GUI
         """
 
+        self._start_called = True
         self._gui = gui
         sumoCMD = ["sumo-gui"] if self._gui else ["sumo"]
 
@@ -103,16 +117,20 @@ class Simulation:
         if config_file != None:
             if config_file.endswith(".sumocfg"):
                 sumoCMD += ["-c", config_file]
-                if self.scenario_name == None: self.scenario_name = get_scenario_name(config_file)
             else:
                 desc = "Invalid config file extension."
                 raise_error(ValueError, desc)
         else:
             sumoCMD += ["-n", net_file]
-            if self.scenario_name == None: self.scenario_name = get_scenario_name(net_file)
             if route_file != None: sumoCMD += ["-r", route_file]
             if add_file != None: sumoCMD += ["-a", add_file]
         
+        if self.scenario_name == None:
+            for filename in [config_file, net_file, route_file, add_file]:
+                if filename != None:
+                    self.scenario_name = get_scenario_name(filename)
+                    break
+
         if cmd_options != None: sumoCMD += cmd_options
 
         if seed != None:
@@ -139,22 +157,13 @@ class Simulation:
                 raise_error(TypeError, desc)
         else:
             self._seed = "random"
- 
-        if isinstance(units, str):
-            if units.upper() in ["METRIC", "IMPERIAL", "UK"]:
-                self.units = Units(["METRIC", "IMPERIAL", "UK"].index(units.upper())+1)
-            else:
-                desc = "Invalid simulation units '{0}' (must be ['METRIC'|'IMPERIAL'|'UK']).".format(units)
-                raise_error(ValueError, desc)
 
-        elif units in [1, 2, 3]: self.units = Units(units)
-        else:
-            desc = "Invalid simulation units '{0}' (must be ['METRIC'|'IMPERIAL'|'UK']).".format(units)
-            raise_error(ValueError, desc)
+        default_cmd_args = ["--no-step-log", "true"]
+        if suppress_traci_warnings: default_cmd_args += ["--no-warnings", "true"]
+        sumoCMD += default_cmd_args
 
         traci.start(sumoCMD)
         self._running = True
-
         self.step_length = float(traci.simulation.getOption("step-length"))
 
         if self._junc_phases != None: self._update_lights()
@@ -171,6 +180,18 @@ class Simulation:
             self.available_detectors[detector_id] = {'type': 'inductionloop', 'position': {'lane_id': traci.inductionloop.getLaneID(detector_id), 'position': traci.inductionloop.getPosition(detector_id)}}
             self.add_detector_subscriptions(detector_id, ["vehicle_ids", "lsm_speed", "lsm_occupancy"])
 
+        if isinstance(units, str):
+            if units.upper() in ["METRIC", "IMPERIAL", "UK"]:
+                self.units = Units(["METRIC", "IMPERIAL", "UK"].index(units.upper())+1)
+            else:
+                desc = "Invalid simulation units '{0}' (must be ['METRIC'|'IMPERIAL'|'UK']).".format(units)
+                raise_error(ValueError, desc)
+
+        elif units in [1, 2, 3]: self.units = Units(units)
+        else:
+            desc = "Invalid simulation units '{0}' (must be ['METRIC'|'IMPERIAL'|'UK']).".format(units)
+            raise_error(ValueError, desc)
+        
         self._all_juncs = list(traci.junction.getIDList())
         self._all_tls = list(traci.trafficlight.getIDList())
         self._all_edges = list(traci.edge.getIDList())
@@ -187,10 +208,16 @@ class Simulation:
         self._get_individual_vehicle_data = get_individual_vehicle_data
         self._automatic_subscriptions = automatic_subscriptions
 
-        self._ignore_TraCI_err = ignore_TraCI_err
         self._suppress_warnings = suppress_warnings
 
         self._sim_start_time = get_time_str()
+
+        if not self._gui:
+            if self.scenario_name == None: _name = "Simulation"
+            else: _name = "'{0}' Scenario".format(self.scenario_name)
+
+            print("Running {0}".format(_name))
+            print("  - Start time: {0}".format(self._sim_start_time))
 
     def load_objects(self, object_parameters: dict|str) -> None:
         """
@@ -316,15 +343,22 @@ class Simulation:
                                 if "vehicle_types" in demand_idxs:
                                     vehicle_types = row[demand_idxs["vehicle_types"]].split(",")
                                     if len(vehicle_types) == 1: vehicle_types = vehicle_types[0]
-                                else: vehicle_types = "default"
-
-                                if "vehicle_type_dists" in demand_idxs:
-                                    vehicle_type_dists = row[demand_idxs["vehicle_type_dists"]].split(",")
-                                    if len(vehicle_type_dists) != len(vehicle_types):
-                                        desc = "Invalid vehicle_type_dists '[{0}]' (must be same length as vehicle_types '{1}').".format(", ".join(vehicle_type_dists), len(vehicle_types))
+                                else:
+                                    vehicle_types = "default"
+                                    if "vehicle_type_dists" in demand_idxs:
+                                        desc = "vehicle_type_dists given without vehicle_types."
                                         raise_error(ValueError, desc, self.curr_step)
-                                    else: vehicle_type_dists = [float(val) for val in vehicle_type_dists]
-                                else: vehicle_type_dists = 1 if isinstance(vehicle_types, str) else [1]*len(vehicle_types)
+
+                                if isinstance(vehicle_types, (list, tuple)):
+                                    if "vehicle_type_dists" in demand_idxs:
+                                        vehicle_type_dists = row[demand_idxs["vehicle_type_dists"]].split(",")
+                                        if len(vehicle_type_dists) != len(vehicle_types):
+                                            desc = "Invalid vehicle_type_dists '[{0}]' (must be same length as vehicle_types '{1}').".format(", ".join(vehicle_type_dists), len(vehicle_types))
+                                            raise_error(ValueError, desc, self.curr_step)
+                                        else: vehicle_type_dists = [float(val) for val in vehicle_type_dists]
+                                    else: vehicle_type_dists = 1 if isinstance(vehicle_types, str) else [1]*len(vehicle_types)
+                                else:
+                                    vehicle_type_dists = None
 
                                 if "initial_speed" in demand_idxs:
                                     initial_speed = row[demand_idxs["initial_speed"]]
@@ -432,7 +466,6 @@ class Simulation:
             self._manual_flow = True
             self._demand_headers = ["routing", "step_range", "veh/step", "vehicle_types", "vehicle_type_dists", "init_speed", "origin_lane", "insertion_sd"]
             self._demand_arrs, self._man_flow_id = [], 0
-            self._demand_sd = 1/3
 
         self._demand_arrs.append([routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, insertion_sd])
 
@@ -477,6 +510,16 @@ class Simulation:
             if not self._suppress_warnings:
                 desc = "Cannot add flow manually as no demand given."
                 raise_warning(desc, self.curr_step)
+
+    def get_demand_table(self) -> None:
+        """
+        Get demand table, if dynamically adding demand.
+        :return (list, list): Demand table headers, demand table value. Returns None if no table.
+        """
+        
+        if self._manual_flow:
+            return self._demand_headers, self._demand_arrs
+        else: return None
 
     def add_tracked_junctions(self, juncs: str|list|dict|None = None) -> None:
         """
@@ -547,7 +590,8 @@ class Simulation:
                     for arr in self._demand_arrs:
                         if arr[1][1] > self.curr_step: return True
             if close: self.end()
-            print('Ended simulation: no vehicles remaining.')
+            if not self._suppress_warnings:
+                raise_warning("Ended simulation early (no vehicles remaining).", self.curr_step)
             return False
         
         return True
@@ -560,7 +604,7 @@ class Simulation:
         try:
             traci.close()
         except traci.exceptions.FatalTraCIError:
-            raise_warning("TraCI is not connected.", self.curr_step)
+            raise_warning("TraCI is not connected (Simulation already ended).", self.curr_step)
         self._running = False
 
     def save_data(self, filename: str|None = None, overwrite: bool = True, json_indent: int|None = 4) -> None:
@@ -570,7 +614,12 @@ class Simulation:
         :param overwrite: Prevent previous outputs being overwritten
         """
 
-        if filename == None: filename = self.scenario_name
+        if filename == None:
+            if self.scenario_name != None:
+                filename = self.scenario_name
+            else:
+                desc = "No filename given."
+                raise_error(ValueError, desc, self.curr_step)
 
         if filename.endswith(".json"):
             w_class, w_mode = json, "w"
@@ -593,7 +642,7 @@ class Simulation:
                 else: w_class.dump(self._all_data, fp, indent=json_indent)
         else:
             desc = "No data to save as a simulation has not been run."
-            raise_error(IndexError, desc, self.curr_step)
+            raise_error(SimulationError, desc, self.curr_step)
 
     def add_tracked_edges(self, edge_ids=None):
         """
@@ -658,16 +707,16 @@ class Simulation:
 
         return self.controllers
 
-    def step_through(self, n_steps: int = 1, end_step: int|None = None, sim_dur: int|None = None, vehicle_types: list|None = None, keep_data: bool = True, append_data: bool = True, pbar: tqdm|None = None) -> dict:
+    def step_through(self, n_steps: int|None = None, end_step: int|None = None, n_seconds: int|None = None, vehicle_types: list|tuple|None = None, keep_data: bool = True, append_data: bool = True, pbar_max_steps: int|None = None) -> dict:
         """
         Step through simulation from the current time until end_step, aggregating data during this period.
         :param n_steps:         Perform n steps of the simulation (defaults to 1)
         :param end_step:        End point for stepping through simulation (given instead of end_step)
-        :param sim_dur:         Simulation duration
+        :param n_seconds:       Simulation duration in seconds
         :param vehicle_types:   Vehicle type(s) to collect data of (list of types or string, defaults to all)
         :param keep_data:       Denotes whether to store data collected during this run (defaults to True)
         :param append_data:     Denotes whether to append simulation data to that of previous runs (defaults to True)
-        :param pbar:            tqdm progress bar updated by 1 with each step, used to 
+        :param pbar_max_steps:  Max value for progress bar (persistent across calls) (negative values remove the progress bar)
         :return dict:           All data collected through the time period, separated by detector
         """
 
@@ -679,15 +728,28 @@ class Simulation:
         detector_list = list(self.available_detectors.keys())
         start_time = self.curr_step
 
-        if end_step == None and n_steps != None: end_step = self.curr_step + n_steps
-        elif end_step == None and sim_dur != None: end_step = self.curr_step + (sim_dur / self.step_length)
-        elif end_step == None: 
+        n_params = 3 - [n_steps, end_step, n_seconds].count(None)
+        if n_params == 0:
             desc = "No time value given."
             raise_error(ValueError, desc, self.curr_step)
+        elif n_params != 1:
+            strs = ["{0}={1}".format(param, val) for param, val in zip(["n_steps", "end_step", "n_seconds"], [n_steps, end_step, n_seconds]) if val != None]
+            desc = "More than 1 time value given ({0}).".format(", ".join(strs))
+            raise_error(ValueError, desc, self.curr_step)
+        
+        if n_steps != None:
+            end_step = self.curr_step + n_steps
+        elif n_seconds != None:
+            end_step = self.curr_step + int(n_seconds / self.step_length)
+
+        n_steps = end_step - self.curr_step
 
         if prev_data == None:
-            prev_steps, all_data = 0, {"scenario_name": self.scenario_name, "scenario_desc": "", "data": {}, "start": start_time, "end": self.curr_step, "step_len": self.step_length, "units": self.units.name, "seed": self._seed, "sim_start": self._sim_start_time, "sim_end": get_time_str()}
+            prev_steps, all_data = 0, {"scenario_name": "", "scenario_desc": "", "data": {}, "start": start_time, "end": self.curr_step, "step_len": self.step_length, "units": self.units.name, "seed": self._seed, "sim_start": self._sim_start_time, "sim_end": get_time_str()}
             
+            if self.scenario_name == None: del all_data["scenario_name"]
+            else: all_data["scenario_name"] = self.scenario_name
+
             if self.scenario_desc == None: del all_data["scenario_desc"]
             else: all_data["scenario_desc"] = self.scenario_desc
 
@@ -713,20 +775,30 @@ class Simulation:
                 prev_steps = prev_steps.pop()
                 all_data = prev_data
 
-        if not isinstance(pbar, tqdm):
-            if not self._gui and n_steps > 1: pbar = tqdm(desc="Running sim (step {0}, {1} vehs)".format(self.curr_step, len(self._all_curr_vehicle_ids)), total=end_step - self.curr_step)
+        create_pbar = False
+
+        if self._gui: create_pbar = False
+        elif pbar_max_steps != None:
+            if isinstance(pbar_max_steps, (int, float)):
+                if pbar_max_steps < 0:
+                    create_pbar = False
+                    self._pbar, self._pbar_length = None, None
+                elif pbar_max_steps != self._pbar_length:
+                    create_pbar, self._pbar_length = True, pbar_max_steps
+                    
+            else:
+                desc = "Invalid pbar_max_steps '{0}' (must be 'int', not '{1}').".format(pbar_max_steps, type(pbar_max_steps).__name__)
+                raise_error(TypeError, desc, self.curr_step)
+        
+        elif not isinstance(self._pbar, tqdm) and not self._gui and n_steps >= 10:
+            create_pbar, self._pbar_length = True, n_steps
+
+        if create_pbar:
+            self._pbar = tqdm(desc="Simulating (step {0}, {1} vehs)".format(self.curr_step, len(self._all_curr_vehicle_ids)), total=self._pbar_length)
 
         while self.curr_step < end_step:
 
-            try: last_step_data, all_v_data = self._step(vehicle_types)
-            except traci.exceptions.FatalTraCIError:
-                self._running = False
-                if self._ignore_TraCI_err:
-                    if not self._suppress_warnings: raise_warning("Fatal TraCI connection error occured.", self.curr_step)
-                    break
-                else:
-                    desc = "Fatal TraCI connection error occured."
-                    raise_error(traci.exceptions.FatalTraCIError, desc, self.curr_step)
+            last_step_data, all_v_data = self._step(vehicle_types)
 
             if self._get_individual_vehicle_data: all_data["data"]["all_vehicles"].append(all_v_data)
             for controller in self.controllers.values(): controller.update()
@@ -752,9 +824,11 @@ class Simulation:
 
             all_data["data"]["trips"] = self._trips
 
-            if isinstance(pbar, tqdm):
-                pbar.update(1)
-                pbar.set_description("Running sim (step {0}, {1} vehs)".format(self.curr_step, len(self._all_curr_vehicle_ids)))
+            if isinstance(self._pbar, tqdm):
+                self._pbar.update(1)
+                self._pbar.set_description("Simulating (step {0}, {1} vehs)".format(self.curr_step, len(self._all_curr_vehicle_ids)))
+                if self._pbar.n == self._pbar.total:
+                    self._pbar, self._pbar_length = None, None
 
         all_data["end"] = self.curr_step
         all_data["sim_end"] = get_time_str()
@@ -769,7 +843,7 @@ class Simulation:
         else:
             self.reset_data()
             return None
-
+            
     def _step(self, vehicle_types: list|None = None) -> dict:
         """
         Increment simulation by one time step, updating light state. step_through is recommended to run the simulation.
@@ -870,7 +944,7 @@ class Simulation:
         
         if self._all_data == None:
             desc = "No data to return (simulation likely has not been run, or data has been reset)."
-            raise_error(KeyError, desc, self.curr_step)
+            raise_error(SimulationError, desc, self.curr_step)
         return self._all_data["data"]["vehicles"]["no_vehicles"][-1]
     
     def get_no_waiting(self) -> float:
@@ -881,7 +955,7 @@ class Simulation:
         
         if self._all_data == None:
             desc = "No data to return (simulation likely has not been run, or data has been reset)."
-            raise_error(KeyError, desc, self.curr_step)
+            raise_error(SimulationError, desc, self.curr_step)
         return self._all_data["data"]["vehicles"]["no_waiting"][-1]
     
     def get_tts(self) -> int:
@@ -892,7 +966,7 @@ class Simulation:
         
         if self._all_data == None:
             desc = "No data to return (simulation likely has not been run, or data has been reset)."
-            raise_error(KeyError, desc, self.curr_step)
+            raise_error(SimulationError, desc, self.curr_step)
         return self._all_data["data"]["vehicles"]["tts"][-1]
     
     def get_delay(self) -> int:
@@ -903,7 +977,7 @@ class Simulation:
         
         if self._all_data == None:
             desc = "No data to return (simulation likely has not been run, or data has been reset)."
-            raise_error(KeyError, desc, self.curr_step)
+            raise_error(SimulationError, desc, self.curr_step)
         return self._all_data["data"]["vehicles"]["delay"][-1]
 
     def _vehicles_in(self, vehicle_ids: str|list|tuple, is_added: bool=False) -> None:
@@ -971,7 +1045,7 @@ class Simulation:
                 else: 
                     desc = "Unrecognised vehicle ID '{0}' in completed trips.".format(vehicle_id)
                     raise_error(KeyError, desc, self.curr_step)
-                    
+                
     def get_last_step_detector_vehicles(self, detector_ids: str|list|tuple, vehicle_types: list|None = None, flatten: bool = False) -> dict|list:
         """
         Get the IDs of vehicles that passed over the specified detectors.
@@ -1113,7 +1187,7 @@ class Simulation:
 
         if self._all_data == None:
             desc = "No detector data as the simulation has not been run or data has been reset."
-            raise_error(IndexError, desc, self.curr_step)
+            raise_error(SimulationError, desc, self.curr_step)
         elif detector_id not in self.available_detectors.keys() or detector_id not in self._all_data["data"]["detectors"].keys():
             desc = "Detector with ID '{0}' not found.".format(detector_id)
             raise_error(KeyError, desc, self.curr_step)
@@ -1423,6 +1497,9 @@ class Simulation:
         :param incident_id: Incident event ID used in the simulation data file
         """
         
+        if self._scheduler == None:
+            self._scheduler = EventScheduler(self)
+            
         if incident_id == None:
             id_idx = 1
             while self._scheduler.get_event_status("incident_{0}".format(id_idx)) != None: id_idx += 1
@@ -1483,7 +1560,7 @@ class Simulation:
             if len(vehicle_ids) != n_vehicles:
                 if assert_n_vehicles:
                     desc = "Incident could not be started (could not find enough vehicles, {0} != {1}).".format()
-                    raise_error(ValueError, desc, self.curr_step)
+                    raise_error(SimulationError, desc, self.curr_step)
                 else:
                     if not self._suppress_warnings: raise_warning("Incident could not be started (could not find enough vehicles, {0} != {1}).".format())
                     return False
@@ -1515,6 +1592,7 @@ class Simulation:
         Tests if a vehicle exists in the network and has departed.
         :return bool: True if ID in list of current vehicle IDs 
         """
+
         if not isinstance(vehicle_id, str):
             desc = "Invalid vehicle_id given '{0}' (must be 'str', not '{1}').".format(vehicle_id, type(vehicle_id).__name__)
             raise_error(TypeError, desc, self.curr_step)
@@ -1526,6 +1604,7 @@ class Simulation:
         Tests if a junction exists in the network.
         :return bool: True if ID in list of all junction IDs 
         """
+
         if not isinstance(junction_id, str):
             desc = "Invalid junction_id given '{0}' (must be 'str', not '{1}').".format(junction_id, type(junction_id).__name__)
             raise_error(TypeError, desc, self.curr_step)
@@ -1537,6 +1616,7 @@ class Simulation:
         Tests if a tracked junction exists in the network.
         :return bool: True if ID in list of tracked junction IDs
         """
+
         if not isinstance(junction_id, str):
             desc = "Invalid junction_id given '{0}' (must be 'str', not '{1}').".format(junction_id, type(junction_id).__name__)
             raise_error(TypeError, desc, self.curr_step)
@@ -1548,6 +1628,7 @@ class Simulation:
         Tests if a tracked junction exists in the network.
         :return bool: True if ID in list of tracked junction IDs
         """
+
         if not isinstance(edge_id, str):
             desc = "Invalid edge_id given '{0}' (must be 'str', not '{1}').".format(edge_id, type(edge_id).__name__)
             raise_error(TypeError, desc, self.curr_step)
@@ -1559,6 +1640,7 @@ class Simulation:
         Tests if a vehicle is loaded (may not have departed).
         :return bool: True if ID in list of loaded vehicle IDs
         """
+
         if not isinstance(vehicle_id, str):
             desc = "Invalid vehicle_id given '{0}' (must be 'str', not '{1}').".format(vehicle_id, type(vehicle_id).__name__)
             raise_error(TypeError, desc, self.curr_step)
@@ -1570,6 +1652,7 @@ class Simulation:
         Tests if a vehicle is loaded but has not departed yet.
         :return bool: True if vehicle has not departed yet
         """
+
         if not isinstance(vehicle_id, str):
             desc = "Invalid vehicle_id given '{0}' (must be 'str', not '{1}').".format(vehicle_id, type(vehicle_id).__name__)
             raise_error(TypeError, desc, self.curr_step)
@@ -1929,12 +2012,13 @@ class Simulation:
                 if self.get_vehicle_vals(vehicle_id, "type") in vehicle_types: vehicle_ids.append(vehicle_id)
 
             return vehicle_ids
-        
+    
     def get_junction_ids(self) -> list:
         """
         Return list of all junctions in the network.
         :return list: All junction IDs
         """
+
         return list(self._all_juncs)
     
     def get_tracked_junction_ids(self) -> list:
@@ -1942,6 +2026,7 @@ class Simulation:
         Return list of all tracked junctions in the network.
         :return list: All tracked junction IDs
         """
+
         return list(self.tracked_junctions.keys())
     
     def get_tracked_edge_ids(self) -> list:
@@ -1949,21 +2034,24 @@ class Simulation:
         Return list of all tracked edges in the network.
         :return list: All tracked edges IDs
         """
+
         return list(self.tracked_edges.keys())
-        
+    
     def get_vehicle_types(self) -> list:
         """
         Return list of all valid vehicle type IDs.
         :return list: All vehicle type IDs
         """
+
         return list(self._all_vehicle_types)
     
     def get_geometry_ids(self, geometry_types: str|list|tuple|None = None) -> list:
         """
         Return list of IDs for all edges and lanes in the network.
-        :param geometry_types: Geometry type ['EDGE'|'LANE'] or list of types
+        :param geometry_types: Geometry type ['edge'|'lane'] or list of types
         :return list:          All geometry types (of type)
         """
+
         valid_types = ["edge", "lane"]
 
         if geometry_types == None: geometry_types = valid_types
@@ -1973,15 +2061,15 @@ class Simulation:
             raise_error(TypeError, desc, self.curr_step)
 
         if len(set(geometry_types) - set(valid_types)) != 0:
-            desc = "Invalid geometry types (must be 'EDGE' and/or 'LANE')."
+            desc = "Invalid geometry types (must be 'edge' and/or 'lane')."
             raise_error(ValueError, desc, self.curr_step)
-        else: geometry_types = [g_type.upper() for g_type in geometry_types]
+        else: geometry_types = [g_type.lower() for g_type in geometry_types]
 
         geometry_ids = []
         if "edge" in geometry_types:
-            geometry_ids += list(self._all_edges)
+            geometry_ids += self._all_edges
         if "lane" in geometry_types:
-            geometry_ids += list(self._all_lanes)
+            geometry_ids += self._all_lanes
         
         return geometry_ids
 
@@ -1991,6 +2079,7 @@ class Simulation:
         :param detector_types: Detector type ['multientryexit'|'inductionloop'] or list of types
         :return list:          All detector IDs (of type)
         """
+
         valid_types = ["multientryexit", "inductionloop"]
 
         if detector_types == None: detector_types = valid_types
@@ -2134,8 +2223,7 @@ class Simulation:
                         data_vals[data_key] = route_idx
 
                     case "route_edges":
-                        if tc.VAR_ROUTE in subscribed_data: route = subscribed_data[tc.VAR_ROUTE]
-                        else: route = list(traci.vehicle.getRoute(vehicle_id))
+                        route = list(traci.vehicle.getRoute(vehicle_id))
                         data_vals[data_key] = route
 
                     case _:
@@ -2218,7 +2306,7 @@ class Simulation:
 
         return all_vehicle_data
 
-    def get_all_vehicle_data(self, vehicle_types: list = None, all_dynamic_data: bool=True) -> dict:
+    def get_all_vehicle_data(self, vehicle_types: list|tuple|None = None, all_dynamic_data: bool=True) -> dict:
         """
         Collects aggregated vehicle data (no. vehicles & no. waiting vehicles) and all individual vehicle data.
         :param vehicle_types: Type(s) of vehicles to include
@@ -2259,6 +2347,7 @@ class Simulation:
         :param data_keys:    List of keys or single key
         :return dict:        Values by data_key (or single value)
         """
+
         all_data_vals = {}
         if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
         elif not isinstance(geometry_ids, (list, tuple)):
@@ -2496,7 +2585,7 @@ class Simulation:
                     case _:
                         desc = "Unrecognised command ('{0}').".format(command)
                         raise_error(AttributeError, desc, self.curr_step)
-                
+            
     def get_last_step_geometry_vehicles(self, geometry_ids: str|list, vehicle_types: list|None = None, flatten: bool = False) -> dict|list:
         """
         Get the IDs of vehicles on a lane or egde, by geometry ID.
@@ -2530,6 +2619,7 @@ class Simulation:
         :param geometry_id: Lane or edge ID
         :return str|None:   Geometry type, or None if it does not exist.
         """
+
         if not isinstance(geometry_id, str):
             desc = "Invalid geometry_id given '{0}' (must be 'str', not '{1}').".format(geometry_id, type(geometry_id).__name__)
             raise_error(TypeError, desc, self.curr_step)
@@ -2544,6 +2634,7 @@ class Simulation:
         :param detector_id: Detector ID
         :return str|None:   Detector type, or None if it does not exist.
         """
+
         if not isinstance(detector_id, str):
             desc = "Invalid detector_id given '{0}' (must be 'str', not '{1}').".format(detector_id, type(detector_id).__name__)
             raise_error(TypeError, desc, self.curr_step)
@@ -2558,6 +2649,7 @@ class Simulation:
         :param route_id:  Route ID
         :return str|None: List of route edges, or None if it does not exist.
         """
+
         if not isinstance(route_id, str):
             desc = "Invalid route_id given '{0}' (must be 'str', not '{1}').".format(route_id, type(route_id).__name__)
             raise_error(TypeError, desc, self.curr_step)
@@ -2572,6 +2664,7 @@ class Simulation:
         :param vehicle_type: Vehicle type ID
         :return bool:        Denotes whether vehicle type exists
         """
+
         if not isinstance(vehicle_type, str):
             desc = "Invalid vehicle_type given '{0}' (must be 'str', not '{1}').".format(vehicle_type, type(vehicle_type).__name__)
             raise_error(TypeError, desc, self.curr_step)
@@ -2584,6 +2677,7 @@ class Simulation:
         :param event_statuses: Event status type or list of types
         :return list: List of event IDs
         """
+
         valid_statuses = ["scheduled", "active", "completed"]
         if isinstance(event_statuses, str): event_statuses = [event_statuses]
         elif event_statuses == None: event_statuses = valid_statuses
@@ -2603,6 +2697,7 @@ class Simulation:
         :param event_id: Event ID
         :return str|None: Returns None if it does not exist, otherwise status ('scheduled'|'active'|'completed')
         """
+
         if self._scheduler == None: return None
         else: return self._scheduler.get_event_status(event_id)
 
@@ -2612,6 +2707,7 @@ class Simulation:
         :param controller_id: Controller ID
         :return str|None: Returns None if it does not exist, otherwise type ('VSLController'|'RGController')
         """
+
         if controller_id in self.controllers: return self.controllers[controller_id].__name__()
         else: return None
 
@@ -2620,6 +2716,7 @@ class Simulation:
         Return list of all controller IDs, or controllers of specified type ('VSLController' or 'RGController').
         :return list: Controller IDs
         """
+
         valid_types = ["VSLController", "RGController"]
         if isinstance(controller_types, str): controller_types = [controller_types]
         elif controller_types == None: controller_types = valid_types
@@ -3028,6 +3125,9 @@ class TrackedEdge:
         self.from_node = edge.getFromNode().getID()
 
         self.step_vehicles = []
+        self.flows = []
+        self.speeds = []
+        self.densities = []
 
         self.sim.add_geometry_subscriptions(self.id, "vehicle_ids")
 
@@ -3045,6 +3145,9 @@ class TrackedEdge:
                      "from_node": self.from_node,
                      "n_lanes": self.n_lanes,
                      "step_vehicles": self.step_vehicles,
+                     "flows": self.flows,
+                     "speeds": self.speeds,
+                     "densities": self.densities,
                      "init_time": self.init_time,
                      "curr_time": self.curr_time}
         
@@ -3059,20 +3162,35 @@ class TrackedEdge:
         self.curr_time = self.sim.curr_step
 
         self.step_vehicles = []
+        self.speeds = []
+        self.densities = []
+        self.flows = []
 
     def update(self) -> None:
         
         self.curr_time = self.sim.curr_step
         last_step_vehs = self.sim.get_last_step_geometry_vehicles(self.id, flatten=True)
 
-        veh_data = []
+        veh_data, total_speed = [], 0
         for veh_id in last_step_vehs:
             vals = self.sim.get_vehicle_vals(veh_id, ["speed", "position", "lane_idx"])
             pos = self._get_distance_on_road(vals["position"])
             if self.sim.units in ['IMPERIAL']: pos *= 0.0006213712
             veh_data.append((veh_id, pos, vals["speed"], vals["lane_idx"]))
-
+            total_speed += vals["speed"]
+        
         self.step_vehicles.append(veh_data)
+
+        n_vehicles = len(veh_data)
+
+        speed = -1 if n_vehicles == 0 else total_speed / n_vehicles
+        if speed != -1 and self.sim.units == "UK": speed = convert_units(speed, "mph", "kmph")
+        density = -1 if n_vehicles == 0 else n_vehicles / self.length
+        flow = -1 if n_vehicles == 0 else speed * density
+
+        self.flows.append(flow)
+        self.speeds.append(speed)
+        self.densities.append(density)
             
     def _get_distance_on_road(self, veh_coors):
         line = LineString(self.linestring)
@@ -3311,3 +3429,6 @@ def _add_linebreaks(string, width):
             lines.append(max_len_str[:line_break_index])
             string = string[line_break_index+1:]
     return lines
+
+class SimulationError(Exception):
+    pass
