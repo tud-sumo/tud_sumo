@@ -33,6 +33,92 @@ class Controller(Enum):
     RG = 2
     METER = 3
 
+def _get_type_str(valid_types, connector=","):
+
+    if isinstance(valid_types, (list, tuple)):
+        types = []
+
+        for vt in valid_types:
+            if isinstance(vt, type): types.append(vt.__name__)
+            elif isinstance(vt, tuple):
+                vt_arr = []
+                for t in vt:
+                    if isinstance(t, type): vt_arr.append(t.__name__)
+                    else: vt_arr.append(type(t).__name__)
+                types.append("[{0}]".format("|".join(vt_arr)))
+
+        return "[{0}]".format(connector.join(types))
+    
+    elif isinstance(valid_types, type): return valid_types.__name__
+
+    else: return valid_types
+
+def validate_list_types(values, valid_types, element_wise=False, param_name=None, curr_sim_step=None, return_validity=False):
+
+    invalid, desc = False, None
+    param_name = param_name if param_name != None else "input list"
+
+    inv_idx, inv_val = None, None
+
+    if isinstance(values, (list, tuple)) and isinstance(valid_types, tuple):
+        if element_wise:
+            if len(values) == len(valid_types):
+                for idx, (value, valid_type) in enumerate(zip(values, valid_types)):
+                    if not isinstance(value, valid_type):
+                        invalid, inv_idx, inv_val = True, idx, value
+                        valid_types = valid_type
+                        break
+            else:
+                desc = "Invalid {0} (must have length '{1}').".format(param_name, len(valid_types))
+                invalid = True
+
+        else:
+            for idx, value in enumerate(values):
+                if type(value) not in valid_types:
+                    invalid, inv_idx, inv_val = True, idx, value
+                    break
+
+    if isinstance(values, (list, tuple)):
+        for idx, value in enumerate(values):
+            if not isinstance(value, valid_types):
+                invalid, inv_idx, inv_val = True, idx, value
+                break
+
+    else:
+        invalid = True
+        if not return_validity:
+            if desc == None: desc = "Invalid {0} (must be '[list|tuple]', not '{1}').".format(param_name, type(values).__name__)
+            caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+            error_msg = "{0}: {1}".format(caller, desc)
+            if curr_sim_step != None: error_msg = "(step {0}) ".format(curr_sim_step) + error_msg
+            raise TypeError(error_msg)
+    
+    if invalid and not return_validity:
+        if desc == None: desc = "Invalid value found in {0} at idx {1} (must be '{3}', '{2}' is '{4}').".format(param_name, inv_idx, inv_val, _get_type_str(valid_types, "|"), type(value).__name__)
+        caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+        error_msg = "{0}: {1}".format(caller, desc)
+        if curr_sim_step != None: error_msg = "(step {0}) ".format(curr_sim_step) + error_msg
+        raise TypeError(error_msg)
+    
+    if return_validity: return invalid
+    else: return values
+
+def validate_type(value, valid_types, param_name=None, curr_sim_step=None, return_validity=False):
+
+    if not isinstance(value, valid_types) or (isinstance(value, tuple) and type(value) not in valid_types):
+        if return_validity: return False
+        else:
+            param_name = param_name if param_name != None else "input"
+            val_str = "" if len(str(value)) >= 20 else "'{0}' ".format(value)
+            desc = "Invalid {0} {1}(must be '{2}', not '{3}').".format(param_name, val_str, _get_type_str(valid_types, "|"), type(value).__name__)
+            caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+            error_msg = "{0}: {1}".format(caller, desc)
+            if curr_sim_step != None: error_msg = "(step {0}) ".format(curr_sim_step) + error_msg
+            raise TypeError(error_msg)
+    
+    if return_validity: return True
+    else: return value
+
 def raise_error(error, desc, curr_sim_step=None):
     caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
     error_msg = "{0}: {1}".format(caller, desc)
@@ -160,13 +246,14 @@ def load_params(parameters: str|dict, params_name: str|None = None, step: int|No
 
     return parameters
 
-def get_aggregated_data(data_vals, time_steps, interval):
+def get_aggregated_data(data_vals, time_steps, interval, avg=True):
 
     agg_start, agg_data, agg_steps = 0, [], []
     while agg_start < len(data_vals):
         period_data = data_vals[agg_start:int(min(agg_start+interval, len(data_vals)))]
         period_data = [max(val, 0) for val in period_data]
-        agg_data.append(sum(period_data) / len(period_data))
+        if avg: agg_data.append(sum(period_data) / len(period_data))
+        else: agg_data.append(sum(period_data))
         period_data = time_steps[agg_start:int(min(agg_start+interval, len(time_steps)))]
         agg_steps.append(period_data[-1])
         agg_start += interval

@@ -1,4 +1,3 @@
-import traci
 from random import random
 from .utils import *
 
@@ -152,13 +151,14 @@ class RGController:
 
         self.detector_info = {}
         for detector_id in self.detector_ids:
-            if detector_id not in self.sim.available_detectors.keys():
+            d_type = self.sim.detector_exists(detector_id)
+            if d_type == None:
                 desc = "Detector ID '{0}' not found.".format(detector_id)
                 raise_error(KeyError, desc, self.sim.curr_step)
-            elif self.sim.available_detectors[detector_id]["type"] != 'inductionloop':
-                desc = "Invalid RG detector type (must be 'inductionloop' not '{0}')".format(self.sim.available_detectors[detector_id]["type"])
+            elif d_type != 'inductionloop':
+                desc = "Invalid RG detector type (must be 'inductionloop' not '{0}')".format(d_type)
                 raise_error(KeyError, desc, self.sim.curr_step)
-            else: self.detector_info[detector_id] = {"location": traci.inductionloop.getLaneID(detector_id)}
+            else: self.detector_info[detector_id] = {"location": self.sim.get_detector_vals(detector_id, "position")}
 
     def __str__(self): return "<RGController: '{0}'>".format(self.id)
     def __name__(self): return "RGController"

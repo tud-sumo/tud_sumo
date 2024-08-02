@@ -1,4 +1,4 @@
-import os, sys, io, traci, sumolib, json, csv, math
+import os, sys, io, traci, sumolib, json, csv, math, inspect
 import traci.constants as tc
 import pickle as pkl
 from tqdm import tqdm
@@ -29,17 +29,8 @@ class Simulation:
         self.step_length = None
         self.units = Units(1)
         
-        if isinstance(scenario_name, (str, type(None))):
-            self.scenario_name = scenario_name
-        else:
-            desc = "Invalid scenario_name '{0}' type (must be [str|None], not '{1}').".format(scenario_name, type(scenario_name).__name__)
-            raise_error(TypeError, desc)
-
-        if isinstance(scenario_desc, (str, type(None))):
-            self.scenario_desc = scenario_desc
-        else:
-            desc = "Invalid scenario_desc type (must be [str|None], not '{1}').".format(scenario_name, type(scenario_name).__name__)
-            raise_error(TypeError, desc)
+        self.scenario_name = validate_type(scenario_name, (str, type(None)), "scenario_name")
+        self.scenario_desc = validate_type(scenario_desc, (str, type(None)), "scenario_desc")
         
         self._seed = None
         self._running = False
@@ -79,6 +70,12 @@ class Simulation:
         self._all_vehicle_types = set([])
         self._known_vehicles = {}
         self._trips = {"incomplete": {}, "completed": {}}
+
+        self._v_in_funcs = []
+        self._v_out_funcs = []
+        self._v_func_params = {}
+        self._valid_v_func_params = ["curr_step", "vehicle_id", "route_id",
+                                     "vehicle_type", "departure", "origin", "destination"] 
 
     def __str__(self):
         if self.scenario_name != None:
@@ -134,9 +131,10 @@ class Simulation:
         if cmd_options != None: sumoCMD += cmd_options
 
         if seed != None:
+            seed = validate_type(seed, (str, int), "seed", self.curr_step)
             if isinstance(seed, str):
                 if seed.upper() != "RANDOM" and not seed.isdigit():
-                    desc = "Invalid seed '{0}' (must be valid 'int' or str 'random').",format(seed)
+                    desc = "Invalid seed '{0}' (must be valid 'int' or str 'random').".format(seed)
                     raise_error(ValueError, desc)
                 elif seed.upper() == "RANDOM":
                     sumoCMD.append("--random")
@@ -152,9 +150,7 @@ class Simulation:
                 set_seed(seed)
                 np.random.seed(seed)
                 self._seed = seed
-            else:
-                desc = "Invalid seed '{0}' type (must be 'str', not '{1}').".format(seed, type(seed).__name__)
-                raise_error(TypeError, desc)
+
         else:
             self._seed = "random"
 
@@ -180,6 +176,7 @@ class Simulation:
             self.available_detectors[detector_id] = {'type': 'inductionloop', 'position': {'lane_id': traci.inductionloop.getLaneID(detector_id), 'position': traci.inductionloop.getPosition(detector_id)}}
             self.add_detector_subscriptions(detector_id, ["vehicle_ids", "lsm_speed", "lsm_occupancy"])
 
+        units = validate_type(units, (str, int), "units", self.curr_step)
         if isinstance(units, str):
             if units.upper() in ["METRIC", "IMPERIAL", "UK"]:
                 self.units = Units(["METRIC", "IMPERIAL", "UK"].index(units.upper())+1)
@@ -188,9 +185,6 @@ class Simulation:
                 raise_error(ValueError, desc)
 
         elif units in [1, 2, 3]: self.units = Units(units)
-        else:
-            desc = "Invalid simulation units '{0}' (must be ['METRIC'|'IMPERIAL'|'UK']).".format(units)
-            raise_error(ValueError, desc)
         
         self._all_juncs = list(traci.junction.getIDList())
         self._all_tls = list(traci.trafficlight.getIDList())
@@ -219,13 +213,14 @@ class Simulation:
             print("Running {0}".format(_name))
             print("  - Start time: {0}".format(self._sim_start_time))
 
-    def load_objects(self, object_parameters: dict|str) -> None:
+    def load_objects(self, object_parameters: str|dict) -> None:
         """
         Load all parameters for TUD SUMO objects: tracked edges/junctions, signal
         phases, controllers and events.
         :param object_parameters: Either dict containing object parameters or '.json|.pkl' filepath
         """
         
+        object_parameters = validate_type(object_parameters, (str, dict), "object_parameters", self.curr_step)
         if isinstance(object_parameters, str):
 
             if object_parameters.endswith(".json"): r_class, r_mode = json, "r"
@@ -240,10 +235,6 @@ class Simulation:
             else:
                 desc = "Object parameter file '{0}' not found.".format(object_parameters)
                 raise_error(FileNotFoundError, desc, self.curr_step)
-
-        elif not isinstance(object_parameters, dict):
-            desc = "Invalid object_parameters type given '{0}' (must be [dict|str], not '{1}').".format(object_parameters, type(object_parameters).__name__)
-            raise_error(TypeError, desc, self.curr_step)
 
         valid_params = {"edges": list, "junctions": dict, "phases": dict, "controllers": dict, "events": dict, "demand": str}
         error, desc = test_input_dict(object_parameters, valid_params, "'object parameters")
@@ -274,164 +265,149 @@ class Simulation:
         :param csv_file: Demand file location.
         """
 
-        if isinstance(csv_file, str):
-            if csv_file.endswith(".csv"):
-                if os.path.exists(csv_file):
-                    with open(csv_file, "r") as fp:
-                        valid_cols = ["origin", "destination", "route_id", "start_time", "end_time", "start_step", "end_step",
-                                  "demand", "number", "vehicle_types", "vehicle_type_dists", "initial_speed", "origin_lane", "insertion_sd"]
-                        demand_idxs = {}
-                        reader = csv.reader(fp)
-                        for idx, row in enumerate(reader):
-                            if idx == 0:
+        csv_file = validate_type(csv_file, str, "demand file", self.curr_step)
+        if csv_file.endswith(".csv"):
+            if os.path.exists(csv_file):
+                with open(csv_file, "r") as fp:
+                    valid_cols = ["origin", "destination", "route_id", "start_time", "end_time", "start_step", "end_step",
+                                "demand", "number", "vehicle_types", "vehicle_type_dists", "initial_speed", "origin_lane", "insertion_sd"]
+                    demand_idxs = {}
+                    reader = csv.reader(fp)
+                    for idx, row in enumerate(reader):
+                        if idx == 0:
 
-                                if len(set(row) - set(valid_cols)) != 0:
-                                    desc = "Invalid demand file (unknown columns '{0}').".format("', '".join(list(set(row) - set(valid_cols))))
-                                    raise_error(KeyError, desc, self.curr_step)
+                            if len(set(row) - set(valid_cols)) != 0:
+                                desc = "Invalid demand file (unknown columns '{0}').".format("', '".join(list(set(row) - set(valid_cols))))
+                                raise_error(KeyError, desc, self.curr_step)
 
-                                if "route_id" in row: demand_idxs["route_id"] = row.index("route_id")
-                                elif "origin" in row and "destination" in row:
-                                    demand_idxs["origin"] = row.index("origin")
-                                    demand_idxs["destination"] = row.index("destination")
-                                else:
-                                    desc = "Invalid demand file (no routing values, must contain 'route_id' or 'origin/destination')."
-                                    raise_error(KeyError, desc, self.curr_step)
-                                
-                                if "start_time" in row and "end_time" in row:
-                                    demand_idxs["start_time"] = row.index("start_time")
-                                    demand_idxs["end_time"] = row.index("end_time")
-                                elif "start_step" in row and "end_step" in row:
-                                    demand_idxs["start_step"] = row.index("start_step")
-                                    demand_idxs["end_step"] = row.index("end_step")
-                                else:
-                                    desc = "Invalid demand file (no time values, must contain 'start_time/end_time' or 'start_step/end_step')."
-                                    raise_error(KeyError, desc, self.curr_step)
-
-                                if "demand" in row: demand_idxs["demand"] = row.index("demand")
-                                elif "number" in row: demand_idxs["number"] = row.index("number")
-                                else:
-                                    desc = "Invalid demand file (no demand values, must contain 'demand/number')."
-                                    raise_error(KeyError, desc, self.curr_step)
-
-                                if "vehicle_types" in row:
-                                    demand_idxs["vehicle_types"] = row.index("vehicle_types")
-                                
-                                if "vehicle_type_dists" in row and "vehicle_types" in row:
-                                    demand_idxs["vehicle_type_dists"] = row.index("vehicle_type_dists")
-
-                                if "initial_speed" in row:
-                                    demand_idxs["initial_speed"] = row.index("initial_speed")
-
-                                if "origin_lane" in row:
-                                    demand_idxs["origin_lane"] = row.index("vehiorigin_lanecle_types")
-
-                                if "insertion_sd" in row:
-                                    demand_idxs["insertion_sd"] = row.index("insertion_sd")
-
+                            if "route_id" in row: demand_idxs["route_id"] = row.index("route_id")
+                            elif "origin" in row and "destination" in row:
+                                demand_idxs["origin"] = row.index("origin")
+                                demand_idxs["destination"] = row.index("destination")
                             else:
-                                
-                                if "route_id" in demand_idxs: routing = row[demand_idxs["route_id"]]
-                                else: routing = (row[demand_idxs["origin"]], row[demand_idxs["destination"]])
+                                desc = "Invalid demand file (no routing values, must contain 'route_id' or 'origin/destination')."
+                                raise_error(KeyError, desc, self.curr_step)
+                            
+                            if "start_time" in row and "end_time" in row:
+                                demand_idxs["start_time"] = row.index("start_time")
+                                demand_idxs["end_time"] = row.index("end_time")
+                            elif "start_step" in row and "end_step" in row:
+                                demand_idxs["start_step"] = row.index("start_step")
+                                demand_idxs["end_step"] = row.index("end_step")
+                            else:
+                                desc = "Invalid demand file (no time values, must contain 'start_time/end_time' or 'start_step/end_step')."
+                                raise_error(KeyError, desc, self.curr_step)
 
-                                if "start_time" in demand_idxs: 
-                                    step_range = (int(row[demand_idxs["start_time"]]) / self.step_length, int(row[demand_idxs["end_time"]]) / self.step_length)
-                                else: step_range = (int(row[demand_idxs["start_step"]]), int(row[demand_idxs["end_step"]]))
+                            if "demand" in row: demand_idxs["demand"] = row.index("demand")
+                            elif "number" in row: demand_idxs["number"] = row.index("number")
+                            else:
+                                desc = "Invalid demand file (no demand values, must contain 'demand/number')."
+                                raise_error(KeyError, desc, self.curr_step)
 
-                                if "number" in demand_idxs: demand = int(row[demand_idxs["number"]]) / convert_units(step_range[1] - step_range[0], "steps", "hours", self.step_length)
-                                else: demand = float(row[demand_idxs["demand"]])
+                            if "vehicle_types" in row:
+                                demand_idxs["vehicle_types"] = row.index("vehicle_types")
+                            
+                            if "vehicle_type_dists" in row and "vehicle_types" in row:
+                                demand_idxs["vehicle_type_dists"] = row.index("vehicle_type_dists")
 
-                                if "vehicle_types" in demand_idxs:
-                                    vehicle_types = row[demand_idxs["vehicle_types"]].split(",")
-                                    if len(vehicle_types) == 1: vehicle_types = vehicle_types[0]
-                                else:
-                                    vehicle_types = "default"
-                                    if "vehicle_type_dists" in demand_idxs:
-                                        desc = "vehicle_type_dists given without vehicle_types."
+                            if "initial_speed" in row:
+                                demand_idxs["initial_speed"] = row.index("initial_speed")
+
+                            if "origin_lane" in row:
+                                demand_idxs["origin_lane"] = row.index("vehiorigin_lanecle_types")
+
+                            if "insertion_sd" in row:
+                                demand_idxs["insertion_sd"] = row.index("insertion_sd")
+
+                        else:
+                            
+                            if "route_id" in demand_idxs: routing = row[demand_idxs["route_id"]]
+                            else: routing = (row[demand_idxs["origin"]], row[demand_idxs["destination"]])
+
+                            if "start_time" in demand_idxs: 
+                                step_range = (int(row[demand_idxs["start_time"]]) / self.step_length, int(row[demand_idxs["end_time"]]) / self.step_length)
+                            else: step_range = (int(row[demand_idxs["start_step"]]), int(row[demand_idxs["end_step"]]))
+
+                            if "number" in demand_idxs: demand = int(row[demand_idxs["number"]]) / convert_units(step_range[1] - step_range[0], "steps", "hours", self.step_length)
+                            else: demand = float(row[demand_idxs["demand"]])
+
+                            if "vehicle_types" in demand_idxs:
+                                vehicle_types = row[demand_idxs["vehicle_types"]].split(",")
+                                if len(vehicle_types) == 1: vehicle_types = vehicle_types[0]
+                            else:
+                                vehicle_types = "default"
+                                if "vehicle_type_dists" in demand_idxs:
+                                    desc = "vehicle_type_dists given without vehicle_types."
+                                    raise_error(ValueError, desc, self.curr_step)
+
+                            if isinstance(vehicle_types, (list, tuple)):
+                                if "vehicle_type_dists" in demand_idxs:
+                                    vehicle_type_dists = row[demand_idxs["vehicle_type_dists"]].split(",")
+                                    if len(vehicle_type_dists) != len(vehicle_types):
+                                        desc = "Invalid vehicle_type_dists '[{0}]' (must be same length as vehicle_types '{1}').".format(", ".join(vehicle_type_dists), len(vehicle_types))
                                         raise_error(ValueError, desc, self.curr_step)
+                                    else: vehicle_type_dists = [float(val) for val in vehicle_type_dists]
+                                else: vehicle_type_dists = 1 if isinstance(vehicle_types, str) else [1]*len(vehicle_types)
+                            else:
+                                vehicle_type_dists = None
 
-                                if isinstance(vehicle_types, (list, tuple)):
-                                    if "vehicle_type_dists" in demand_idxs:
-                                        vehicle_type_dists = row[demand_idxs["vehicle_type_dists"]].split(",")
-                                        if len(vehicle_type_dists) != len(vehicle_types):
-                                            desc = "Invalid vehicle_type_dists '[{0}]' (must be same length as vehicle_types '{1}').".format(", ".join(vehicle_type_dists), len(vehicle_types))
-                                            raise_error(ValueError, desc, self.curr_step)
-                                        else: vehicle_type_dists = [float(val) for val in vehicle_type_dists]
-                                    else: vehicle_type_dists = 1 if isinstance(vehicle_types, str) else [1]*len(vehicle_types)
-                                else:
-                                    vehicle_type_dists = None
+                            if "initial_speed" in demand_idxs:
+                                initial_speed = row[demand_idxs["initial_speed"]]
+                                if initial_speed.isdigit(): initial_speed = float(initial_speed)
+                            else: initial_speed = "max"
 
-                                if "initial_speed" in demand_idxs:
-                                    initial_speed = row[demand_idxs["initial_speed"]]
-                                    if initial_speed.isdigit(): initial_speed = float(initial_speed)
-                                else: initial_speed = "max"
+                            if "origin_lane" in demand_idxs:
+                                origin_lane = row[demand_idxs["origin_lane"]]
+                                if origin_lane.isdigit(): origin_lane = int(origin_lane)
+                            else: origin_lane = "best"
 
-                                if "origin_lane" in demand_idxs:
-                                    origin_lane = row[demand_idxs["origin_lane"]]
-                                    if origin_lane.isdigit(): origin_lane = int(origin_lane)
-                                else: origin_lane = "best"
+                            if "insertion_sd" in demand_idxs:
+                                insertion_sd = float(row[demand_idxs["insertion_sd"]])
+                            else: insertion_sd = 1/3
 
-                                if "insertion_sd" in demand_idxs:
-                                    insertion_sd = float(row[demand_idxs["insertion_sd"]])
-                                else: insertion_sd = 1/3
-
-                                self.add_demand(routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, insertion_sd)
-                                
-                else:
-                    desc = "Demand file '{0}' not found.".format(csv_file)
-                    raise_error(FileNotFoundError, desc, self.curr_step)
+                            self.add_demand(routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, insertion_sd)
+                            
             else:
-                desc = "Invalid demand file '{0}' format (must be '.csv').".format(csv_file)
-                raise_error(ValueError, desc, self.curr_step)
+                desc = "Demand file '{0}' not found.".format(csv_file)
+                raise_error(FileNotFoundError, desc, self.curr_step)
         else:
-            desc = "Invalid demand file '{0}' (must be 'str' filepath, not '{1}').",format(csv_file, type(csv_file).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+            desc = "Invalid demand file '{0}' format (must be '.csv').".format(csv_file)
+            raise_error(ValueError, desc, self.curr_step)
 
         self._manual_flow = True
 
-    def add_demand(self, routing: str|list|tuple, step_range: list|tuple, demand: int|float, vehicle_types: str|list|tuple|None=None, vehicle_type_dists: list|tuple|None=None, initial_speed: str|int|float="max", origin_lane: str|int|float="best", insertion_sd: float=1/3):
+    def add_demand(self, routing: str|list|tuple, step_range: list|tuple, demand: int|float, vehicle_types: str|list|tuple|None = None, vehicle_type_dists: list|tuple|None = None, initial_speed: str|int|float = "max", origin_lane: str|int|float = "best", insertion_sd: float = 1/3):
         """
         Adds traffic flow demand for a specific route and time.
-        :param routing: Either a route ID or OD pair of edge IDs
-        :param step_range: (2x1) list or tuple denoting the start and end steps of the demand
-        :param demand: Generated flow in vehicles/hour
-        :param vehicle_types: List of vehicle type IDs
+        :param routing:            Either a route ID or OD pair of edge IDs
+        :param step_range:         (2x1) list or tuple denoting the start and end steps of the demand
+        :param demand:             Generated flow in vehicles/hour
+        :param vehicle_types:      List of vehicle type IDs
         :param vehicle_type_dists: Vehicle type distributions used when generating flow
-        :param initial_speed: Initial speed at insertion, either ['max'|'random'] or number > 0
-        :param origin_lane:   Lane for insertion at origin, either ['random'|'free'|'allowed'|'best'|'first'] or lane index
+        :param initial_speed:      Initial speed at insertion, either ['max'|'random'] or number > 0
+        :param origin_lane:        Lane for insertion at origin, either ['random'|'free'|'allowed'|'best'|'first'] or lane index
         """
 
+        routing = validate_type(routing, (str, list, tuple), "routing", self.curr_step)
         if isinstance(routing, str) and not self.route_exists(routing):
             desc = "Unknown route ID '{0}'.".format(routing)
             raise_error(KeyError, desc, self.curr_step)
         elif isinstance(routing, (list, tuple)):
-            if len(routing) == 2:
-                if self.geometry_exists(routing[0]) != "edge":
-                    desc = "Unknown origin edge ID '{0}'.".format(routing[0])
-                    raise_error(KeyError, desc, self.curr_step)
-                elif self.geometry_exists(routing[1]) != "edge":
-                    desc = "Unknown destination edge ID '{0}'.".format(routing[1])
-                    raise_error(KeyError, desc, self.curr_step)
-            else:
-                desc = "Invalid routing '{0}' (OD-pairs must be (2x1) [list|tuple]).".format(routing)
+            routing = validate_list_types(routing, (str, str), True, "routing", self.curr_step)
+            if self.geometry_exists(routing[0]) != "edge":
+                desc = "Unknown origin edge ID '{0}'.".format(routing[0])
                 raise_error(KeyError, desc, self.curr_step)
-        else:
-            desc = "Invalid routing '{0}' type (must be (2x1) [list|tuple] or route ID, not '{1}').".format(routing, type(routing).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+            elif self.geometry_exists(routing[1]) != "edge":
+                desc = "Unknown destination edge ID '{0}'.".format(routing[1])
+                raise_error(KeyError, desc, self.curr_step)
 
-        if not isinstance(step_range, (list, tuple)):
-            desc = "Invalid step_range '{0}' type (must be (2x1) [list|tuple], not '{1}').".format(step_range, type(step_range).__name__)
-            raise_error(TypeError, desc, self.curr_step)
-        elif False in [isinstance(val, (int, float)) for val in step_range]:
-            desc = "Invalid step_range '{0}' type (must only contain values of type [int|float]).".format(step_range)
-            raise_error(TypeError, desc, self.curr_step)
-        elif step_range[1] < step_range[0] or step_range[1] < self.curr_step:
+        step_range = validate_list_types(step_range, ((int, float), (int, float)), True, "step_range", self.curr_step)
+        if step_range[1] < step_range[0] or step_range[1] < self.curr_step:
             desc = "Invalid step_range '{0}' (must be valid range and end > current step)."
             raise_error(ValueError, desc, self.curr_step)
 
         if vehicle_types != None:
-            if not isinstance(vehicle_types, (str, list, tuple)):
-                desc = "Invalid vehicle_types '{0}' type (must be [str|list|tuple], not '{1}').".format(vehicle_types, type(vehicle_types).__name__)
-                raise_error(TypeError, desc, self.curr_step)
+            vehicle_types = validate_list_types(vehicle_types, str, param_name="vehicle_types", curr_sim_step=self.curr_step)
             if isinstance(vehicle_types, (list, tuple)):
                 for type_id in vehicle_types:
                     if not self.vehicle_type_exists(type_id):
@@ -448,19 +424,12 @@ class Simulation:
             desc = "Invalid vehicle_type_dists (vehicle_types is a single type ID, so no distribution)."
             raise_error(ValueError, desc, self.curr_step)
         elif vehicle_type_dists != None:
-            if not isinstance(vehicle_type_dists, (list, tuple)):
-                desc = "Invalid vehicle_type_dists '{0}' type (must be [list|tuple], not '{1}').".format(vehicle_type_dists, type(vehicle_type_dists).__name__)
-                raise_error(TypeError, desc, self.curr_step)
-            elif len(vehicle_type_dists) != len(vehicle_types):
+            vehicle_type_dists = validate_list_types(vehicle_type_dists, float, param_name="vehicle_type_dists", curr_sim_step=self.curr_step)
+            if len(vehicle_type_dists) != len(vehicle_types):
                 desc = "Invalid vehicle_type_dists (must be same length as vehicle_types, {0} != {1}).".format(len(vehicle_type_dists), len(vehicle_types))
                 raise_warning(ValueError, desc, self.curr_step)
-            elif False in [isinstance(val, (float)) for val in vehicle_type_dists]:
-                desc = "Invalid vehicle_type_dists '{0}' type (must only contain values of type 'float').".format(vehicle_type_dists)
-                raise_error(TypeError, desc, self.curr_step)
 
-        if not isinstance(insertion_sd, (float, int)):
-            desc = "Invalid insertion_sd '{0}' type (must be [int|float], not '{1}').".format(insertion_sd, type(insertion_sd).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        insertion_sd = validate_type(insertion_sd, (int, float), "insertion_sd", self.curr_step)
 
         if not self._manual_flow:
             self._manual_flow = True
@@ -523,8 +492,9 @@ class Simulation:
 
     def add_tracked_junctions(self, juncs: str|list|dict|None = None) -> None:
         """
-        Initalise junctions and start tracking states and flows.
-        :param juncs: Either junc_id|list of junc_ids, or dict containing juncs parameters. Defaults to all junctions with traffic lights.
+        Initalise junctions and start tracking states and flows. Defaults to all
+        junctions with traffic lights.
+        :param juncs: Either junc_id|list of junc_ids, or dict containing juncs parameters
         """
 
         self.track_juncs = True
@@ -533,15 +503,13 @@ class Simulation:
             track_list, junc_params = self._all_tls, None
         else:
             
+            juncs = validate_type(juncs, (str, list, dict), "juncs", self.curr_step)
             if isinstance(juncs, dict):
                 junc_ids, junc_params = list(juncs.keys()), juncs
             elif isinstance(juncs, (list, tuple)):
                 junc_ids, junc_params = juncs, None
             elif isinstance(juncs, str):
                 junc_ids, junc_params = [juncs], None
-            else:
-                desc = "Invalid junc_params (must be [str|list|dict], not '{0}').".format(type(juncs).__name__)
-                raise_error(TypeError, desc, self.curr_step)
 
             if len(set(self._all_juncs).intersection(set(junc_ids))) != len(junc_ids):
                 desc = "Junction ID(s) not found ('{0}').".format("', '".join(set(junc_ids) - set(self._all_juncs)))
@@ -576,12 +544,13 @@ class Simulation:
         self._sim_start_time = get_time_str()
         self._all_data = None
 
-    def is_running(self, close: bool=True) -> bool:
+    def is_running(self, close: bool = True) -> bool:
         """
         Returns whether the simulation is running.
         :param close: If True, end Simulation
         :return bool: Denotes if the simulation is running
         """
+
         if not self._running: return self._running
 
         if traci.simulation.getMinExpectedNumber() == 0:
@@ -644,16 +613,15 @@ class Simulation:
             desc = "No data to save as a simulation has not been run."
             raise_error(SimulationError, desc, self.curr_step)
 
-    def add_tracked_edges(self, edge_ids=None):
+    def add_tracked_edges(self, edge_ids: str|list|None = None):
         """
         Initalise edges and start collecting data.
         :param edge_ids: List of edge IDs or single ID, defaults to all
         """
+
         if edge_ids == None: edge_ids = self._all_edges
-        if isinstance(edge_ids, str): edge_ids = [edge_ids]
-        elif not isinstance(edge_ids, (list, tuple)):
-            desc = "Invalid edge_ids '{0}' type (must be [str|list|tuple], not '{1}').".format(edge_ids, type(edge_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        if not isinstance(edge_ids, list): edge_ids = [edge_ids]
+        edge_ids = validate_list_types(edge_ids, str, param_name="edge_ids", curr_sim_step=self.curr_step)
 
         for edge_id in edge_ids:
             if self.geometry_exists(edge_id) == None:
@@ -664,11 +632,12 @@ class Simulation:
                 raise_error(ValueError, desc, self.curr_step)
             self.tracked_edges[edge_id] = TrackedEdge(edge_id, self)
 
-    def add_events(self, event_params: Event|list|dict|str) -> None:
+    def add_events(self, event_params: Event|str|list|dict) -> None:
         """
         Add events and event scheduler.
         :param event_parms: Event parameters [Event|[Event]|dict|filepath]
         """
+
         if self._scheduler == None:
             self._scheduler = EventScheduler(self)
         self._scheduler.add_events(event_params)
@@ -730,8 +699,7 @@ class Simulation:
 
         n_params = 3 - [n_steps, end_step, n_seconds].count(None)
         if n_params == 0:
-            desc = "No time value given."
-            raise_error(ValueError, desc, self.curr_step)
+            n_steps = 1
         elif n_params != 1:
             strs = ["{0}={1}".format(param, val) for param, val in zip(["n_steps", "end_step", "n_seconds"], [n_steps, end_step, n_seconds]) if val != None]
             desc = "More than 1 time value given ({0}).".format(", ".join(strs))
@@ -745,7 +713,7 @@ class Simulation:
         n_steps = end_step - self.curr_step
 
         if prev_data == None:
-            prev_steps, all_data = 0, {"scenario_name": "", "scenario_desc": "", "data": {}, "start": start_time, "end": self.curr_step, "step_len": self.step_length, "units": self.units.name, "seed": self._seed, "sim_start": self._sim_start_time, "sim_end": get_time_str()}
+            all_data = {"scenario_name": "", "scenario_desc": "", "data": {}, "start": start_time, "end": self.curr_step, "step_len": self.step_length, "units": self.units.name, "seed": self._seed, "sim_start": self._sim_start_time, "sim_end": get_time_str()}
             
             if self.scenario_name == None: del all_data["scenario_name"]
             else: all_data["scenario_name"] = self.scenario_name
@@ -757,23 +725,14 @@ class Simulation:
             if self.track_juncs: all_data["data"]["junctions"] = {}
             if len(self.tracked_edges) > 0: all_data["data"]["edges"] = {}
             if len(self.controllers) > 0: all_data["data"]["controllers"] = {}
-            all_data["data"]["vehicles"] = {}
+            all_data["data"]["vehicles"] = {"no_vehicles": [], "no_waiting": [], "tts": [], "delay": []}
             if self._manual_flow and self._demand_arrs != None:
                 all_data["data"]["demand"] = {"headers": self._demand_headers, "table": self._demand_arrs}
             all_data["data"]["trips"] = {"incomplete": {}, "completed": {}}
             if self._get_individual_vehicle_data: all_data["data"]["all_vehicles"] = []
             if self._scheduler != None: all_data["data"]["events"] = {}
-        else:
-
-            lens = [len(data_arr) for data_arr in prev_data["data"]["vehicles"].values()]
-            prev_steps = set(lens)
-            
-            if len(prev_steps) != 1:
-                desc = "Invalid prev_data (different length arrays)."
-                raise_error(ValueError, desc, self.curr_step)
-            else:
-                prev_steps = prev_steps.pop()
-                all_data = prev_data
+        
+        else: all_data = prev_data
 
         create_pbar = False
 
@@ -804,8 +763,6 @@ class Simulation:
             for controller in self.controllers.values(): controller.update()
             for edge in self.tracked_edges.values(): edge.update()
 
-            all_data["data"]["vehicles"] = {"no_vehicles": [], "no_waiting": [], "tts": [], "delay": []}
-
             if "detectors" in all_data["data"]:
                 if len(all_data["data"]["detectors"]) == 0:
                     for detector_id in detector_list:
@@ -818,7 +775,7 @@ class Simulation:
                         raise_error(KeyError, desc, self.curr_step)
                     for data_key, data_val in last_step_data["detectors"][detector_id].items():
                         all_data["data"]["detectors"][detector_id][data_key].append(data_val)
-
+            
             for data_key, data_val in last_step_data["vehicles"].items():
                 all_data["data"]["vehicles"][data_key].append(data_val)
 
@@ -979,14 +936,98 @@ class Simulation:
             desc = "No data to return (simulation likely has not been run, or data has been reset)."
             raise_error(SimulationError, desc, self.curr_step)
         return self._all_data["data"]["vehicles"]["delay"][-1]
+    
+    def add_vehicle_in_funcs(self, functions) -> None:
+        """
+        Add a function (or list of functions) that will are called with each
+        new vehicle that enters the simulation. Valid parameters are 'curr_step',
+        'vehicle_id', 'route_id', 'vehicle_type', 'departure', 'origin', 'destination'.
+        :param functions: Function or list of functions
+        """
 
-    def _vehicles_in(self, vehicle_ids: str|list|tuple, is_added: bool=False) -> None:
+        if not isinstance(functions, list): functions = [functions]
+        
+        for func in functions:
+            func_params = inspect.getargspec(func).args
+            for param in func_params:
+                if param not in self._valid_v_func_params:
+                    desc = "Invalid function parameter '{0}' (not in ['{1}']).".format(param, "','".join(self._valid_v_func_params))
+                    raise_error(ValueError, desc, self.curr_step)
+            
+            self._v_in_funcs.append(func)
+            self._v_func_params[func.__name__] = func_params
+
+    def remove_vehicle_in_funcs(self, functions) -> None:
+        """
+        Stop a function called with each new vehicle that enters the simulation.
+        :param functions: Function (or function name) or list of functions
+        """
+        
+        if not isinstance(functions, list): functions = [functions]
+        rm_func_names = [func.__name__ if not isinstance(func, str) else func for func in functions]
+
+        for func_name in rm_func_names:
+            if func_name in self._v_func_params:
+                del self._v_func_params[func_name]
+            else:
+                desc = "Function '{0}()' not found.".format(func_name)
+                raise_error(KeyError, desc, self.curr_step)
+
+        new_v_in_funcs = []
+        for func in self._v_in_funcs:
+            if func.__name__ not in rm_func_names:
+                new_v_in_funcs.append(func)
+
+        self._v_in_funcs = new_v_in_funcs
+
+    def add_vehicle_out_funcs(self, functions) -> None:
+        """
+        Add a function (or list of functions) that will are called with each
+        vehicle that exits the simulation. Valid parameters are 'curr_step'
+        and 'vehicle_id'.
+        :param functions: Function or list of functions
+        """
+
+        if not isinstance(functions, list): functions = [functions]
+        
+        for func in functions:
+            func_params = inspect.getargspec(func).args
+            for param in func_params:
+                if param not in self._valid_v_func_params[:2]:
+                    desc = "Invalid function parameter '{0}' (not in ['{1}']).".format(param, "','".join(self._valid_v_func_params[:2]))
+                    raise_error(ValueError, desc, self.curr_step)
+            
+            self._v_out_funcs.append(func)
+            self._v_func_params[func.__name__] = func_params
+
+    def remove_vehicle_out_funcs(self, functions) -> None:
+        """
+        Stop a function called with each vehicle that exits the simulation.
+        :param functions: Function (or function name) or list of functions
+        """
+        
+        if not isinstance(functions, list): functions = [functions]
+        rm_func_names = [func.__name__ if not isinstance(func, str) else func for func in functions]
+
+        for func_name in rm_func_names:
+            if func_name in self._v_func_params:
+                del self._v_func_params[func_name]
+            else:
+                desc = "Function '{0}()' not found.".format(func_name)
+                raise_error(KeyError, desc, self.curr_step)
+
+        new_v_out_funcs = []
+        for func in self._v_out_funcs:
+            if func.__name__ not in rm_func_names:
+                new_v_out_funcs.append(func)
+
+        self._v_out_funcs = new_v_out_funcs
+
+    def _vehicles_in(self, vehicle_ids: str|list|tuple, is_added: bool = False) -> None:
 
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
         elif isinstance(vehicle_ids, set): vehicle_ids = list(vehicle_ids)
-        elif not isinstance(vehicle_ids, (list, tuple)):
-            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        vehicle_ids = validate_list_types(vehicle_ids, str, param_name="vehicle_ids", curr_sim_step=self.curr_step)
 
         for vehicle_id in vehicle_ids:
 
@@ -1002,13 +1043,19 @@ class Simulation:
                                                      "origin": origin,
                                                      "destination": destination}
             
-    def _vehicles_out(self, vehicle_ids: str|list|tuple, is_removed: bool=False) -> None:
+            for func in self._v_in_funcs:
+                param_dict, trip_data = {}, self._trips["incomplete"][vehicle_id]
+                for param in self._v_func_params[func.__name__]:
+                    if param in trip_data: param_dict[param] = trip_data[param]
+                    elif param == "vehicle_id": param_dict[param] = vehicle_id
+                    elif param == "curr_step": param_dict[param] = self.curr_step
+                func(**param_dict)
+            
+    def _vehicles_out(self, vehicle_ids: str|list|tuple, is_removed: bool = False) -> None:
 
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
         elif isinstance(vehicle_ids, set): vehicle_ids = list(vehicle_ids)
-        elif not isinstance(vehicle_ids, (list, tuple)):
-            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        vehicle_ids = validate_list_types(vehicle_ids, str, param_name="vehicle_ids", curr_sim_step=self.curr_step)
 
         for vehicle_id in vehicle_ids:
 
@@ -1045,6 +1092,13 @@ class Simulation:
                 else: 
                     desc = "Unrecognised vehicle ID '{0}' in completed trips.".format(vehicle_id)
                     raise_error(KeyError, desc, self.curr_step)
+
+            for func in self._v_out_funcs:
+                param_dict = {}
+                for param in self._v_func_params[func.__name__]:
+                    if param == "vehicle_id": param_dict[param] = vehicle_id
+                    elif param == "curr_step": param_dict[param] = self.curr_step
+                func(**param_dict)
                 
     def get_last_step_detector_vehicles(self, detector_ids: str|list|tuple, vehicle_types: list|None = None, flatten: bool = False) -> dict|list:
         """
@@ -1088,9 +1142,7 @@ class Simulation:
 
         all_data_vals = {}
         if isinstance(detector_ids, str): detector_ids = [detector_ids]
-        elif not isinstance(detector_ids, (list, tuple)):
-            desc = "Invalid detector_ids given '{0}' (must be [str|(str)], not '{1}').".format(detector_ids, type(detector_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        detector_ids = validate_list_types(detector_ids, str, param_name="detector_ids", curr_sim_step=self.curr_step)
 
         for detector_id in detector_ids:
             if detector_id not in self.available_detectors.keys():
@@ -1250,7 +1302,7 @@ class Simulation:
             junc_phase["curr_time"] = sum(junc_phase["times"][:junc_phase["curr_phase"]])
             junc_phase["cycle_len"] = sum(junc_phase["times"])
 
-        self._update_lights(new_junc_phases.keys())
+        self._update_lights(list(new_junc_phases.keys()))
 
     def set_tl_colour(self, junction_id: str|int, colour_str: str) -> None:
         """
@@ -1269,9 +1321,7 @@ class Simulation:
                 state_str = traci.trafficlight.getRedYellowGreenState(junction_id)
                 m_len = len(state_str)
 
-        if not isinstance(colour_str, str):
-            desc = "Invalid colour_str (must be 'str', not '{0}').".format(type(colour_str).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        colour_str = validate_type(colour_str, str, "colour_str", self.curr_step)
         
         if len(colour_str) == 1:
             junc_phases = {junction_id: {"phases": [colour_str*m_len], "times": [math.inf]}}
@@ -1363,7 +1413,7 @@ class Simulation:
             desc = "Invalid phase number '{0}' (must be [0-{1}]).".format(phase_no, len(self._junc_phases[junction_id]["phases"]))
             raise_error(ValueError, desc, self.curr_step)
 
-    def _update_lights(self, junction_ids: list|str = None) -> None:
+    def _update_lights(self, junction_ids: list|str|None = None) -> None:
         """
         Update light settings for given junctions.
         :param junction_ids: Junction ID, or list of IDs (defaults to all)
@@ -1371,6 +1421,7 @@ class Simulation:
 
         if junction_ids is None: junction_ids = self._junc_phases.keys()
         elif isinstance(junction_ids, str): junction_ids = [junction_ids]
+        junction_ids = validate_list_types(junction_ids, str, param_name="junction_ids", curr_sim_step=self.curr_step)
 
         for junction_id in junction_ids:
             curr_setting = traci.trafficlight.getRedYellowGreenState(junction_id)
@@ -1394,28 +1445,24 @@ class Simulation:
             desc = "Invalid vehicle_id given '{0}' (must be unique).".format(vehicle_id)
             raise_error(ValueError, desc, self.curr_step)
         
-        if not isinstance(initial_speed, (str, int, float)):
-            desc = "Invalid initial_speed given '{0}' (must be [str|float], not '{1}').".format(initial_speed, type(initial_speed).__name__)
-            raise_error(TypeError, desc, self.curr_step)
-        elif isinstance(initial_speed, str) and initial_speed not in ["max", "random"]:
+        origin_lane = validate_type(origin_lane, (str, int), "origin_lane", self.curr_step)
+        initial_speed = validate_type(initial_speed, (str, int, float), "initial_speed", self.curr_step)
+        if isinstance(initial_speed, str) and initial_speed not in ["max", "random"]:
             desc = "Invalid initial_speed string given '{0}' (must be ['max'|'random']).".format(initial_speed, type(initial_speed).__name__)
             raise_error(TypeError, desc, self.curr_step)
         elif isinstance(initial_speed, (int, float)) and initial_speed < 0:
             desc = "Invalid initial_speed value given '{0}' (must be > 0).".format(initial_speed, type(initial_speed).__name__)
             raise_error(TypeError, desc, self.curr_step)
 
-        if not self.vehicle_type_exists(vehicle_type) and vehicle_type != "default":
-            desc = "Vehicle type ID '{0}' not found.".format(vehicle_type)
-            raise_error(TypeError, desc, self.curr_step)
-
-        if not isinstance(origin_lane, (str, int)):
-            desc = "Invalid origin_lane given '{0}' (must be [random|free|allowed|best|first] or lane index).".format(origin_lane)
-            raise_error(type, desc, self.curr_step)
-
         if isinstance(initial_speed, (int, float)):
             units = "kmph" if self.units.name == "METRIC" else "mph"
             initial_speed = convert_units(initial_speed, units, "m/s")
 
+        if not self.vehicle_type_exists(vehicle_type) and vehicle_type != "default":
+            desc = "Vehicle type ID '{0}' not found.".format(vehicle_type)
+            raise_error(TypeError, desc, self.curr_step)
+
+        routing = validate_type(routing, (str, list, tuple), "routing", self.curr_step)
         if isinstance(routing, str):
             route_id = routing
             routing = self.route_exists(route_id)
@@ -1427,6 +1474,7 @@ class Simulation:
                 raise_error(KeyError, desc, self.curr_step)
 
         elif isinstance(routing, (list, tuple)):
+            routing = validate_list_types(routing, str, param_name="routing", curr_sim_step=self.curr_step)
             if len(routing) == 2:
                 for geometry_id in routing:
                     g_class = self.geometry_exists(geometry_id)
@@ -1457,9 +1505,6 @@ class Simulation:
             else:
                 desc = "Invalid routing given '[{0}]' (must have shape (2x1)).".format(",".join(routing))
                 raise_error(TypeError, desc, self.curr_step)
-        else:
-            desc = "Invalid routing given '{0}' (must be [str|(str)], not '{1}').".format(routing, type(routing).__name__)
-            raise_error(TypeError, desc, self.curr_step)
     
     def remove_vehicles(self, vehicle_ids: str|list|tuple) -> None:
         """
@@ -1468,9 +1513,7 @@ class Simulation:
         """
         
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
-        elif not isinstance(vehicle_ids, (list, tuple)):
-            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        vehicle_ids = validate_list_types(vehicle_ids, str, param_name="vehicle_ids", curr_sim_step=self.curr_step)
 
         for vehicle_id in vehicle_ids:
             if self.vehicle_exists(vehicle_id):
@@ -1549,9 +1592,7 @@ class Simulation:
 
         elif geometry_ids != None:
             if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
-            elif not isinstance(geometry_ids, (list, tuple)):
-                desc = "Invalid geometry_ids given '{0}' (must be [str|(str)], not '{1}').".format(geometry_ids, type(geometry_ids).__name__)
-                raise_error(TypeError, desc, self.curr_step)
+            geometry_ids = validate_list_types(geometry_ids, str, param_name="geometry_ids", curr_sim_step=self.curr_step)
 
             all_geometry_vehicles = self.get_last_step_geometry_vehicles(geometry_ids)
             vehicle_ids = choices(all_geometry_vehicles, min(n_vehicles, len(all_geometry_vehicles)))
@@ -1567,9 +1608,7 @@ class Simulation:
 
         if vehicle_ids != None:
             if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
-            elif not isinstance(vehicle_ids, (list, tuple)):
-                desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
-                raise_error(TypeError, desc, self.curr_step)
+            vehicle_ids = validate_list_types(vehicle_ids, str, param_name="vehicle_ids", curr_sim_step=self.curr_step)
 
             for vehicle_id in vehicle_ids:
                 if not self.vehicle_exists(vehicle_id):
@@ -1593,9 +1632,7 @@ class Simulation:
         :return bool: True if ID in list of current vehicle IDs 
         """
 
-        if not isinstance(vehicle_id, str):
-            desc = "Invalid vehicle_id given '{0}' (must be 'str', not '{1}').".format(vehicle_id, type(vehicle_id).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        vehicle_id = validate_type(vehicle_id, str, "vehicle_id", self.curr_step)
 
         return vehicle_id in self._all_curr_vehicle_ids
     
@@ -1605,9 +1642,7 @@ class Simulation:
         :return bool: True if ID in list of all junction IDs 
         """
 
-        if not isinstance(junction_id, str):
-            desc = "Invalid junction_id given '{0}' (must be 'str', not '{1}').".format(junction_id, type(junction_id).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        junction_id = validate_type(junction_id, str, "junction_id", self.curr_step)
 
         return junction_id in self._all_juncs
     
@@ -1617,9 +1652,7 @@ class Simulation:
         :return bool: True if ID in list of tracked junction IDs
         """
 
-        if not isinstance(junction_id, str):
-            desc = "Invalid junction_id given '{0}' (must be 'str', not '{1}').".format(junction_id, type(junction_id).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        junction_id = validate_type(junction_id, str, "junction_id", self.curr_step)
 
         return junction_id in self.tracked_junctions
     
@@ -1629,9 +1662,7 @@ class Simulation:
         :return bool: True if ID in list of tracked junction IDs
         """
 
-        if not isinstance(edge_id, str):
-            desc = "Invalid edge_id given '{0}' (must be 'str', not '{1}').".format(edge_id, type(edge_id).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        edge_id = validate_type(edge_id, str, "edge_id", self.curr_step)
 
         return edge_id in self.tracked_edges
     
@@ -1641,9 +1672,7 @@ class Simulation:
         :return bool: True if ID in list of loaded vehicle IDs
         """
 
-        if not isinstance(vehicle_id, str):
-            desc = "Invalid vehicle_id given '{0}' (must be 'str', not '{1}').".format(vehicle_id, type(vehicle_id).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        vehicle_id = validate_type(vehicle_id, str, "vehicle_id", self.curr_step)
 
         return vehicle_id in self._all_loaded_vehicle_ids
     
@@ -1653,10 +1682,9 @@ class Simulation:
         :return bool: True if vehicle has not departed yet
         """
 
-        if not isinstance(vehicle_id, str):
-            desc = "Invalid vehicle_id given '{0}' (must be 'str', not '{1}').".format(vehicle_id, type(vehicle_id).__name__)
-            raise_error(TypeError, desc, self.curr_step)
-        elif not self.vehicle_loaded(vehicle_id):
+        vehicle_id = validate_type(vehicle_id, str, "vehicle_id", self.curr_step)
+
+        if not self.vehicle_loaded(vehicle_id):
             desc = "Vehicle with ID '{0}' has not been loaded.".format(vehicle_id)
             raise_error(KeyError, desc, self.curr_step)
         
@@ -1670,14 +1698,10 @@ class Simulation:
         """
 
         if isinstance(data_keys, str): data_keys = [data_keys]
-        elif not isinstance(data_keys, (list, tuple)):
-            desc = "Invalid data_keys given '{0}' (must be [str|(str)], not '{1}').".format(data_keys, type(data_keys).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        data_keys = validate_list_types(data_keys, str, param_name="data_keys", curr_sim_step=self.curr_step)
 
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
-        elif not isinstance(vehicle_ids, (list, tuple)):
-            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        vehicle_ids = validate_list_types(vehicle_ids, str, param_name="vehicle_ids", curr_sim_step=self.curr_step)
         
         for vehicle_id in vehicle_ids:
             if self.vehicle_exists(vehicle_id):
@@ -1699,9 +1723,7 @@ class Simulation:
         """
 
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
-        elif not isinstance(vehicle_ids, (list, tuple)):
-            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        vehicle_ids = validate_list_types(vehicle_ids, str, param_name="vehicle_ids", curr_sim_step=self.curr_step)
 
         for vehicle_id in vehicle_ids:
             if self.vehicle_exists(vehicle_id):
@@ -1718,14 +1740,10 @@ class Simulation:
         """
 
         if isinstance(data_keys, str): data_keys = [data_keys]
-        elif not isinstance(data_keys, (list, tuple)):
-            desc = "Invalid data_keys given '{0}' (must be [str|(str)], not '{1}').".format(data_keys, type(data_keys).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        data_keys = validate_list_types(data_keys, str, param_name="data_keys", curr_sim_step=self.curr_step)
 
         if isinstance(detector_ids, str): detector_ids = [detector_ids]
-        elif not isinstance(detector_ids, (list, tuple)):
-            desc = "Invalid detector_ids given '{0}' (must be [str|(str)], not '{1}').".format(detector_ids, type(detector_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        detector_ids = validate_list_types(detector_ids, str, param_name="detector_ids", curr_sim_step=self.curr_step)
 
         for detector_id in detector_ids:
             if detector_id not in self.available_detectors.keys():
@@ -1756,9 +1774,7 @@ class Simulation:
         """
 
         if isinstance(detector_ids, str): detector_ids = [detector_ids]
-        elif not isinstance(detector_ids, (list, tuple)):
-            desc = "Invalid detector_ids given '{0}' (must be [str|(str)], not '{1}').".format(detector_ids, type(detector_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        detector_ids = validate_list_types(detector_ids, str, param_name="detector_ids", curr_sim_step=self.curr_step)
 
         for detector_id in detector_ids:
             if detector_id not in self.available_detectors.keys():
@@ -1784,14 +1800,10 @@ class Simulation:
         """
 
         if isinstance(data_keys, str): data_keys = [data_keys]
-        elif not isinstance(data_keys, (list, tuple)):
-            desc = "Invalid data_keys given '{0}' (must be [str|(str)], not '{1}').".format(data_keys, type(data_keys).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        data_keys = validate_list_types(data_keys, str, param_name="data_keys", curr_sim_step=self.curr_step)
 
         if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
-        elif not isinstance(geometry_ids, (list, tuple)):
-            desc = "Invalid geometry_ids given '{0}' (must be [str|(str)], not '{1}').".format(geometry_ids, type(geometry_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        geometry_ids = validate_list_types(geometry_ids, str, param_name="geometry_ids", curr_sim_step=self.curr_step)
 
         for geometry_id in geometry_ids:
             g_name = self.geometry_exists(geometry_id)
@@ -1816,9 +1828,7 @@ class Simulation:
         """
 
         if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
-        elif not isinstance(geometry_ids, (list, tuple)):
-            desc = "Invalid geometry_ids given '{0}' (must be [str|(str)], not '{1}').".format(geometry_ids, type(geometry_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        geometry_ids = validate_list_types(geometry_ids, str, param_name="geometry_ids", curr_sim_step=self.curr_step)
 
         for geometry_id in geometry_ids:
             g_name = self.geometry_exists(geometry_id)
@@ -1848,9 +1858,7 @@ class Simulation:
         """
 
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
-        elif not isinstance(vehicle_ids, (list, tuple)):
-            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        vehicle_ids = validate_list_types(vehicle_ids, str, param_name="vehicle_ids", curr_sim_step=self.curr_step)
 
         for vehicle_id in vehicle_ids:
             if not self.vehicle_exists(vehicle_id):
@@ -1998,14 +2006,12 @@ class Simulation:
             return list(self._all_curr_vehicle_ids)
         else:
             if isinstance(vehicle_types, str): vehicle_types = [vehicle_types]
-            elif not isinstance(vehicle_types, (list, tuple)):
-                desc = "Invalid vehicle types value '{0}' (must be [str|(str)], not '{1}').".format(vehicle_types, type(vehicle_types).__name__)
-                raise_error(TypeError, desc, self.curr_step)
-            else:
-                for vehicle_type in vehicle_types:
-                    if not self.vehicle_type_exists(vehicle_type):
-                        desc = "Vehicle type ID '{0}' not found.".format(vehicle_type, type(vehicle_type).__name__)
-                        raise_error(TypeError, desc, self.curr_step)
+            vehicle_types = validate_list_types(vehicle_types, str, param_name="vehicle_types", curr_sim_step=self.curr_step)
+
+            for vehicle_type in vehicle_types:
+                if not self.vehicle_type_exists(vehicle_type):
+                    desc = "Vehicle type ID '{0}' not found.".format(vehicle_type, type(vehicle_type).__name__)
+                    raise_error(TypeError, desc, self.curr_step)
             
             vehicle_ids = []
             for vehicle_id in list(self._all_curr_vehicle_ids):
@@ -2056,9 +2062,7 @@ class Simulation:
 
         if geometry_types == None: geometry_types = valid_types
         elif isinstance(geometry_types, str): geometry_types = [geometry_types]
-        elif not isinstance(geometry_types, (list, tuple)):
-            desc = "Invalid geometry types value '{0}' (must be [str|(str)], not '{1}').".format(geometry_types, type(geometry_types).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        geometry_types = validate_list_types(geometry_types, str, param_name="geometry_types", curr_sim_step=self.curr_step)
 
         if len(set(geometry_types) - set(valid_types)) != 0:
             desc = "Invalid geometry types (must be 'edge' and/or 'lane')."
@@ -2084,9 +2088,7 @@ class Simulation:
 
         if detector_types == None: detector_types = valid_types
         elif isinstance(detector_types, str): detector_types = [detector_types]
-        elif not isinstance(detector_types, (list, tuple)):
-            desc = "Invalid route egdes value '{0}' (must be [str|(str)], not '{1}').".format(detector_types, type(detector_types).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        detector_types = validate_list_types(detector_types, str, param_name="detector_types", curr_sim_step=self.curr_step)
             
         if len(set(detector_types) - set(valid_types)) != 0:
             desc = "Invalid detector types (must be 'multientryexit' and/or 'inductionloop')."
@@ -2097,6 +2099,156 @@ class Simulation:
             if det_info["type"] in detector_types: detector_ids.append(det_id)
         
         return detector_ids
+    
+    def get_path_edges(self, origin: str, destination: str, curr_optimal: bool = True) -> list|None:
+        """
+        Find an optimal route between 2 edges (using the A* algorithm).
+        :param origin:                Origin edge ID
+        :param destination:           Destination edge ID
+        :param curr_optimal:          Denotes whether to find current optimal route (ie. whether to consider current conditions)
+        :return [None|(list, float)]: Returns list of edge IDs & travel time (s) (based on curr_optimal), or None if no route exists
+        """
+        origin = validate_type(origin, str, "origin", self.curr_step)
+        destination = validate_type(destination, str, "destination", self.curr_step)
+
+        if origin == destination:
+            desc = "Invalid origin-destination pair ({0}, {1}).".format(origin, destination)
+            raise_error(ValueError, desc, self.curr_step)
+        if self.geometry_exists(origin) != "edge":
+            desc = "Origin edge with ID '{0}' not found.".format(origin)
+            raise_error(KeyError, desc, self.curr_step)
+        if self.geometry_exists(destination) != "edge":
+            desc = "Destination edge with ID '{0}' not found.".format(origin)
+            raise_error(KeyError, desc, self.curr_step)
+
+        tt_key = "curr_travel_time" if curr_optimal else "ff_travel_time"
+
+        h = {node: 1 for node in self._all_edges}
+        open_list = set([origin])
+        closed_list = set([])
+        distances = {origin: 0}
+        adjacencies = {origin: origin}
+
+        while len(open_list) > 0:
+            curr_edge = None
+
+            for node in open_list:
+                if curr_edge == None or distances[node] + h[node] < distances[curr_edge] + h[curr_edge]: curr_edge = node
+ 
+            if curr_edge == None: return None
+ 
+            if curr_edge == destination:
+                optimal_path = []
+ 
+                while adjacencies[curr_edge] != curr_edge:
+                    optimal_path.append(curr_edge)
+                    curr_edge = adjacencies[curr_edge]
+ 
+                optimal_path.append(origin)
+                optimal_path.reverse()
+
+                return optimal_path, self.get_path_travel_time(optimal_path, curr_optimal)
+ 
+            outgoing_edges = self.get_geometry_vals(curr_edge, "outgoing_edges")
+            for connected_edge in outgoing_edges:
+
+                if connected_edge not in open_list and connected_edge not in closed_list:
+                    open_list.add(connected_edge)
+                    adjacencies[connected_edge] = curr_edge
+                    distances[connected_edge] = distances[curr_edge] + self.get_geometry_vals(connected_edge, tt_key)
+                    
+                else:
+                    if distances[connected_edge] > distances[curr_edge] + self.get_geometry_vals(connected_edge, tt_key):
+                        distances[connected_edge] = distances[curr_edge] + self.get_geometry_vals(connected_edge, tt_key)
+                        adjacencies[connected_edge] = curr_edge
+ 
+                        if connected_edge in closed_list:
+                            closed_list.remove(connected_edge)
+                            open_list.add(connected_edge)
+ 
+            open_list.remove(curr_edge)
+            closed_list.add(curr_edge)
+ 
+        return None
+    
+    def get_path_travel_time(self, edge_ids: list|tuple, curr_tt: bool = True, unit: str = "seconds") -> float:
+        """
+        Calculates the travel time for a route.
+        :param edge_ids: List of edge IDs
+        :param curr_tt:  Denotes whether to find the current travel time (ie. whether to consider current conditions)
+        :param unit:     Time unit (either ['steps'|'seconds'|'minutes'|'hours'])
+        :return float:   Travel time
+        """
+        
+        edge_ids = validate_list_types(edge_ids, str, param_name="edge_ids", curr_sim_step=self.curr_step)
+        
+        tt_key = "curr_travel_time" if curr_tt else "ff_travel_time"
+        total_tt = sum([self.get_geometry_vals(edge_id, tt_key) for edge_id in edge_ids])
+
+        return convert_units(total_tt, "hours", unit, self.step_length)
+    
+    def is_valid_path(self, edge_ids: list|tuple) -> bool:
+        """
+        Checks whether a list of edges is a valid connected path. If two disconnected
+        edges are given, it returns whether there is a path between them.
+        :param edge_ids: List of edge IDs
+        :return bool:    Denotes whether it is a valid path
+        """
+
+        edge_ids = validate_list_types(edge_ids, str, param_name="edge_ids", curr_sim_step=self.curr_step)
+        if isinstance(edge_ids, (list, tuple)):
+            if len(edge_ids) == 0:
+                desc = "Empty edge ID list."
+                raise_error(ValueError, desc, self.curr_step)
+                
+            for edge_id in edge_ids:
+                if self.geometry_exists(edge_id) != 'edge':
+                    desc = "Edge with ID '{0}' not found.".format(edge_id)
+                    raise_error(KeyError, desc, self.curr_step)
+
+            if len(edge_ids) == 1:
+                return True
+            
+            elif len(edge_ids) == 2:
+                if edge_ids[-1] not in self.get_geometry_vals(edge_ids[0], "outgoing_edges"):
+                    return self.get_path_edges(edge_ids[0], edge_ids[1]) != None
+                else: return True
+            
+            else:
+                for idx in range(len(edge_ids) - 1):
+                    if edge_ids[idx + 1] not in self.get_geometry_vals(edge_ids[idx], "outgoing_edges"): return False
+
+        return True
+    
+    def add_route(self, routing: list|tuple, route_id: str|None = None, assert_new_id: bool = True) -> None:
+        """
+        Add a new route. If only 2 edge IDs are given, vehicles calculate
+        optimal route at insertion, otherwise vehicles take specific edges.
+        :param routing: List of edge IDs
+        :param route_id: Route ID, if not given, generated from origin-destination
+        :param assert_new_id: If True, an error is thrown for duplicate route IDs
+        """
+        
+        routing = validate_list_types(routing, str, param_name="routing", curr_sim_step=self.curr_step)
+        if isinstance(routing, (list, tuple)):
+            if len(routing) > 1 and self.is_valid_path(routing):
+                if route_id == None:
+                    route_id = "{0}_{1}".format(routing[0], routing[-1])
+
+                if self.route_exists(route_id) == None:
+                    traci.route.add(route_id, routing)
+                    self._all_routes[route_id] = tuple(routing)
+
+                elif assert_new_id:
+                    desc = "Route or route with ID '{0}' already exists.".format(route_id)
+                    raise_error(ValueError, desc, self.curr_step)
+
+                elif not self._suppress_warnings:
+                    raise_warning("Route or route with ID '{0}' already exists.".format(route_id), self.curr_step)
+
+            else:
+                desc = "No valid path between edges '{0}' and '{1}.".format(routing[0], routing[-1])
+                raise_error(ValueError, desc, self.curr_step)
 
     def get_vehicle_vals(self, vehicle_ids: list|tuple|str, data_keys: str|list) -> dict|str|int|float|list:
         """
@@ -2108,9 +2260,7 @@ class Simulation:
 
         all_data_vals = {}
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
-        elif not isinstance(vehicle_ids, (list, tuple)):
-            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        vehicle_ids = validate_list_types(vehicle_ids, str, param_name="vehicle_ids", curr_sim_step=self.curr_step)
 
         for vehicle_id in vehicle_ids:
             if not self.vehicle_exists(vehicle_id):
@@ -2251,9 +2401,7 @@ class Simulation:
 
         all_vehicle_data = {}
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
-        elif not isinstance(vehicle_ids, (list, tuple)):
-            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(vehicle_ids, type(vehicle_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        vehicle_ids = validate_list_types(vehicle_ids, str, param_name="vehicle_ids", curr_sim_step=self.curr_step)
 
         for vehicle_id in vehicle_ids:
             if not self.vehicle_exists(vehicle_id):
@@ -2350,9 +2498,7 @@ class Simulation:
 
         all_data_vals = {}
         if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
-        elif not isinstance(geometry_ids, (list, tuple)):
-            desc = "Invalid geometry_ids given '{0}' (must be [str|(str)], not '{1}').".format(geometry_ids, type(geometry_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        geometry_ids = validate_list_types(geometry_ids, str, param_name="geometry_ids", curr_sim_step=self.curr_step)
 
         for geometry_id in geometry_ids:
             g_name = self.geometry_exists(geometry_id)
@@ -2409,13 +2555,19 @@ class Simulation:
                         continue
 
                     case "curr_travel_time":
-                        data_vals[data_key] = g_class.getTraveltime(geometry_id)
+                        speed_key = "max_speed" if self.get_geometry_vals(geometry_id, "vehicle_count") == 0 else "vehicle_speed"
+                        vals = self.get_geometry_vals(geometry_id, ("length", speed_key))
+                        length, speed = vals["length"], vals[speed_key]
+                        if self.units.name == "UK": speed = convert_units(speed, "mph", "kmph")
+                        data_vals[data_key] = length / speed
                         continue
 
                     case "ff_travel_time":
-                        length, speed = self.get_geometry_vals(geometry_id, ("length", "max_speed"))
+                        vals = self.get_geometry_vals(geometry_id, ("length", "max_speed"))
+                        length, speed = vals["length"], vals["max_speed"]
                         if self.units.name == "UK": speed = convert_units(speed, "mph", "kmph")
                         data_vals[data_key] = length / speed
+                        continue
 
                     case "emissions":
                         data_vals[data_key] = ({"CO2": g_class.getCO2Emission(geometry_id), "CO": g_class.getCO2Emission(geometry_id), "HC": g_class.getHCEmission(geometry_id),
@@ -2423,12 +2575,16 @@ class Simulation:
                         continue
 
                     case "length":
-                        if g_name == "edge": geometry = self.network.getEdge(geometry_id)
-                        else: geometry = self.network.getLane(geometry_id)
-                        length = LineString(geometry.getShape()).length
-                        
-                        units = "kilometres" if self.units.name == "METRIC" else "miles"
+                        if geometry_id in self.get_tracked_edge_ids():
+                            length = self.tracked_edges[geometry_id].length
+                        else:
+                            if g_name == "edge": geometry = self.network.getEdge(geometry_id)
+                            else: geometry = self.network.getLane(geometry_id)
+                            length = LineString(geometry.getShape()).length
+                            
+                            units = "kilometres" if self.units.name == "METRIC" else "miles"
                         data_vals[data_key] = convert_units(length, "metres", units)
+                        continue
                         
                 if g_name == "edge":
                     match data_key:
@@ -2505,9 +2661,7 @@ class Simulation:
         """
         
         if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
-        elif not isinstance(geometry_ids, (list, tuple)):
-            desc = "Invalid vehicle_ids given '{0}' (must be [str|(str)], not '{1}').".format(geometry_ids, type(geometry_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        geometry_ids = validate_list_types(geometry_ids, str, param_name="geometry_ids", curr_sim_step=self.curr_step)
 
         for geometry_id in geometry_ids:
             if geometry_id in self._all_edges:   g_class, g_name = traci.edge, "edge"
@@ -2617,12 +2771,10 @@ class Simulation:
         """
         Get geometry type by ID, if geometry with the ID exists.
         :param geometry_id: Lane or edge ID
-        :return str|None:   Geometry type, or None if it does not exist.
+        :return str|None:   Geometry type ['edge'|'lane'], or None if it does not exist.
         """
 
-        if not isinstance(geometry_id, str):
-            desc = "Invalid geometry_id given '{0}' (must be 'str', not '{1}').".format(geometry_id, type(geometry_id).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        geometry_id = validate_type(geometry_id, str, "geometry_id", self.curr_step)
 
         if geometry_id in self._all_edges: return "edge"
         elif geometry_id in self._all_lanes: return "lane"
@@ -2635,9 +2787,7 @@ class Simulation:
         :return str|None:   Detector type, or None if it does not exist.
         """
 
-        if not isinstance(detector_id, str):
-            desc = "Invalid detector_id given '{0}' (must be 'str', not '{1}').".format(detector_id, type(detector_id).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        detector_id = validate_type(detector_id, str, "detector_id", self.curr_step)
 
         if detector_id in self.available_detectors.keys():
             return self.available_detectors[detector_id]["type"]
@@ -2650,26 +2800,22 @@ class Simulation:
         :return str|None: List of route edges, or None if it does not exist.
         """
 
-        if not isinstance(route_id, str):
-            desc = "Invalid route_id given '{0}' (must be 'str', not '{1}').".format(route_id, type(route_id).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        route_id = validate_type(route_id, str, "route_id", self.curr_step)
 
         if route_id in self._all_routes.keys():
             return self._all_routes[route_id]
         else: return None
 
-    def vehicle_type_exists(self, vehicle_type: str) -> bool:
+    def vehicle_type_exists(self, vehicle_type_id: str) -> bool:
         """
         Get whether vehicle_type exists.
         :param vehicle_type: Vehicle type ID
         :return bool:        Denotes whether vehicle type exists
         """
 
-        if not isinstance(vehicle_type, str):
-            desc = "Invalid vehicle_type given '{0}' (must be 'str', not '{1}').".format(vehicle_type, type(vehicle_type).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        vehicle_type_id = validate_type(vehicle_type_id, str, "vehicle_type_id", self.curr_step)
 
-        return vehicle_type in list(self._all_vehicle_types)
+        return vehicle_type_id in list(self._all_vehicle_types)
 
     def get_event_ids(self, event_statuses: str|list|tuple|None = None) -> list:
         """
@@ -2737,9 +2883,7 @@ class Simulation:
         """
 
         if isinstance(controller_ids, str): controller_ids = [controller_ids]
-        elif not isinstance(controller_ids, (list, tuple)):
-            desc = "Invalid controller_ids '{0}' type (must be [str|list|tuple], not '{1}').".format(controller_ids, type(controller_ids).__name__)
-            raise_error(TypeError, desc, self.curr_step)
+        controller_ids = validate_list_types(controller_ids, str, param_name="controller_ids", curr_sim_step=self.curr_step)
 
         for controller_id in controller_ids:
             if self.controller_exists(controller_id) != None:

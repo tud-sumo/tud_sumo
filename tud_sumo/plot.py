@@ -235,7 +235,7 @@ class Plotter:
         :param save_fig:      Output image filename, will show image if not given
         """
 
-        plt_colour = {"G": self.DONKERGROEN, "Y": self.GEEL, "R": self.ROOD}
+        tl_colours = {"G": self.DONKERGROEN, "Y": self.GEEL, "R": self.ROOD}
 
         if self.simulation != None:
 
@@ -363,8 +363,8 @@ class Plotter:
             for m_durs in tl_durs:
                 if len(m_durs) != 0: all_plotted = False
             
-            if plot_percent: ax.bar(ms, curr_bar, bottom=offset, color=plt_colour[curr_colour])
-            else: ax.barh(ms, curr_bar, left=offset, color=plt_colour[curr_colour])
+            if plot_percent: ax.bar(ms, curr_bar, bottom=offset, color=tl_colours[curr_colour])
+            else: ax.barh(ms, curr_bar, left=offset, color=tl_colours[curr_colour])
 
             for m in range(m_len): offset[m] = offset[m] + curr_bar[m]
 
@@ -782,16 +782,17 @@ class Plotter:
         fig.tight_layout()
         self._display_figure(save_fig)
 
-    def plot_vehicle_data(self, data_key: str, plot_cumulative: bool=False, time_range: list|tuple|None=None, show_events: bool=True, line_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_vehicle_data(self, data_key: str, plot_cumulative: bool=False, aggregation_steps: int|None=None, time_range: list|tuple|None=None, show_events: bool=True, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot network-wide vehicle data.
-        :param data_key:        Data key to plot, either "no_vehicles", "no_waiting", "tts" or "delay"
-        :param plot_cumulative: Bool denoting whether to plot cumulative values
-        :param time_range:      Plotting time range (in plotter class units)
-        :param show_events:     Bool denoting whether to plot when events occur
-        :param line_colour:     Line colour for plot (defaults to TUD 'blauw')
-        :param fig_title:       If given, will overwrite default title
-        :param save_fig:        Output image filename, will show image if not given
+        :param data_key:          Data key to plot, either "no_vehicles", "no_waiting", "tts" or "delay"
+        :param plot_cumulative:   Bool denoting whether to plot cumulative values
+        :param aggregation_steps: If given, values are aggregated using this interval
+        :param time_range:        Plotting time range (in plotter class units)
+        :param show_events:       Bool denoting whether to plot when events occur
+        :param plt_colour:        Line colour for plot (defaults to TUD 'blauw')
+        :param fig_title:         If given, will overwrite default title
+        :param save_fig:          Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -810,7 +811,10 @@ class Plotter:
         x_vals = get_time_steps(y_vals, self.time_unit, step, start)
         x_vals, y_vals = limit_vals_by_range(x_vals, y_vals, time_range)
 
-        ax.plot(x_vals, y_vals, color=self._get_colour(line_colour))
+        if aggregation_steps != None:
+            y_vals, x_vals = get_aggregated_data(y_vals, x_vals, aggregation_steps)
+
+        ax.plot(x_vals, y_vals, color=self._get_colour(plt_colour))
 
         if fig_title == None:
             fig_title = default_titles[data_key]
@@ -832,17 +836,18 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def plot_detector_data(self, detector_id: str, data_key: str, plot_cumulative: bool=False, time_range: list|tuple|None=None, show_events: bool=True, line_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_detector_data(self, detector_id: str, data_key: str, plot_cumulative: bool=False, aggregation_steps: int|None=None, time_range: list|tuple|None=None, show_events: bool=True, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot detector data.
-        :param detector_id:     Detector ID
-        :param data_key:        Data key to plot, either "speeds", "vehicle_counts" or "occupancies"
-        :param plot_cumulative: Bool denoting whether to plot cumulative values
-        :param time_range:      Plotting time range (in plotter class units)
-        :param show_events:     Bool denoting whether to plot when events occur
-        :param line_colour:     Line colour for plot (defaults to TUD 'blauw')
-        :param fig_title:       If given, will overwrite default title
-        :param save_fig:        Output image filename, will show image if not given
+        :param detector_id:       Detector ID
+        :param data_key:          Data key to plot, either "speeds", "vehicle_counts" or "occupancies"
+        :param plot_cumulative:   Bool denoting whether to plot cumulative values
+        :param aggregation_steps: If given, values are aggregated using this interval
+        :param time_range:        Plotting time range (in plotter class units)
+        :param show_events:       Bool denoting whether to plot when events occur
+        :param plt_colour:        Line colour for plot (defaults to TUD 'blauw')
+        :param fig_title:         If given, will overwrite default title
+        :param save_fig:          Output image filename, will show image if not given
         """
         
         if self.simulation != None:
@@ -867,7 +872,10 @@ class Plotter:
         x_vals = get_time_steps(y_vals, self.time_unit, step, start)
         x_vals, y_vals = limit_vals_by_range(x_vals, y_vals, time_range)
 
-        ax.plot(x_vals, y_vals, color=self._get_colour(line_colour))
+        if aggregation_steps != None:
+            y_vals, x_vals = get_aggregated_data(y_vals, x_vals, aggregation_steps)
+
+        ax.plot(x_vals, y_vals, color=self._get_colour(plt_colour))
 
         if fig_title == None:
             fig_title = "{0} (Detector '{1}')".format(default_titles[data_key], detector_id)
@@ -890,13 +898,13 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def plot_od_demand(self, routing: str|list|tuple|None=None, plot_sim_dur: bool=True, show_events: bool=True, line_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_od_demand(self, routing: str|list|tuple|None=None, plot_sim_dur: bool=True, show_events: bool=True, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plots traffic demand added with TUD-SUMO.
         :param routing:      Either string (route ID or 'all'), OD pair ('A', 'B') or None (defaulting to all)
         :param plot_sim_dur: If False, only previous demand in the simulation is plotted, otherwise all demand
         :param show_events:  Bool denoting whether to plot when events occur
-        :param line_colour:  Line colour for plot (defaults to TUD 'blauw')
+        :param plt_colour:   Line colour for plot (defaults to TUD 'blauw')
         :param fig_title:    If given, will overwrite default title
         :param save_fig:     Output image filename, will show image if not given
         """
@@ -958,7 +966,7 @@ class Plotter:
             desc = "Unknown routing '{0}' (no demand found).".format(routing)
             raise_error(KeyError, desc)
 
-        ax.plot(time_steps, demand_vals, color=self._get_colour(line_colour))
+        ax.plot(time_steps, demand_vals, color=self._get_colour(plt_colour))
         ax.set_ylabel("Demand (vehicles/hour)")
         ax.set_xlabel(default_labels["sim_time"])
         ax.set_xlim([convert_units(start, "steps", self.time_unit, step), convert_units(end, "steps", self.time_unit, step)])
@@ -1017,7 +1025,7 @@ class Plotter:
             origin, destination = trip["origin"], trip["destination"]
             veh_type = trip["vehicle_type"]
 
-            if vehicle_types != None and veh_type not in veh_type: continue
+            if vehicle_types != None and veh_type not in vehicle_types: continue
             
             if origin not in od_trip_times.keys():
                 if add_new:
@@ -1346,12 +1354,12 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def plot_rg_data(self, rg_id: str, time_range: list|tuple|None=None, show_events: bool=True, line_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_rg_data(self, rg_id: str, time_range: list|tuple|None=None, show_events: bool=True, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot how many vehicles are diverted by RG controller.
         :param rg_id:       RG controller ID
         :param show_events: Bool denoting whether to plot when events occur
-        :param line_colour: Line colour for plot (defaults to TUD 'blauw')
+        :param plt_colour:  Line colour for plot (defaults to TUD 'blauw')
         :param fig_title:   If given, will overwrite default title
         :param save_fig:    Output image filename, will show image if not given
         """
@@ -1535,7 +1543,7 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def plot_trajectories(self, edge_ids: list|tuple, lane_idx: int|None=None, vehicle_pct: float=1, rnd_seed: int|None=None, time_range: list|tuple|None=None, show_events: bool=True, line_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_trajectories(self, edge_ids: list|tuple, lane_idx: int|None=None, vehicle_pct: float=1, rnd_seed: int|None=None, time_range: list|tuple|None=None, show_events: bool=True, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot vehicle trajectory data from tracked edge data.
         :param edge_ids:    Single tracked egde ID or list of IDs
@@ -1544,7 +1552,7 @@ class Plotter:
         :param rnd_seed:    When vehicle_pct < 1, vehicles are selected randomly with rnd_seed
         :param time_range:  Plotting time range (in plotter class units)
         :param show_events: Bool denoting whether to plot when events occur
-        :param line_colour: Line colour for plot (defaults to TUD 'blauw')
+        :param plt_colour:  Line colour for plot (defaults to TUD 'blauw')
         :param fig_title:   If given, will overwrite default title
         :param save_fig:    Output image filename, will show image if not given
         """
@@ -1647,7 +1655,7 @@ class Plotter:
             
             elif vehicle_id in line_x_vals and vehicle_id in line_y_vals:
                 if len(line_x_vals[vehicle_id]) > 1:
-                    ax.plot(line_x_vals[vehicle_id], line_y_vals[vehicle_id], color=self._get_colour(line_colour), linewidth=0.5, zorder=1)
+                    ax.plot(line_x_vals[vehicle_id], line_y_vals[vehicle_id], color=self._get_colour(plt_colour), linewidth=0.5, zorder=1)
                     
                     if lane_idx != None and line_x_vals[vehicle_id][-1] < x_lim[1]:
                         exit_x.append(line_x_vals[vehicle_id][-1])
@@ -1660,7 +1668,7 @@ class Plotter:
 
         for vehicle_id in line_x_vals.keys():
             if len(line_x_vals[vehicle_id]) > 1:
-                ax.plot(line_x_vals[vehicle_id], line_y_vals[vehicle_id], color=self._get_colour(line_colour), linewidth=0.5, zorder=1)
+                ax.plot(line_x_vals[vehicle_id], line_y_vals[vehicle_id], color=self._get_colour(plt_colour), linewidth=0.5, zorder=1)
                 if lane_idx != None and line_x_vals[vehicle_id][-1] < x_lim[1]:
                     exit_x.append(line_x_vals[vehicle_id][-1])
                     exit_y.append(line_y_vals[vehicle_id][-1])
@@ -1827,7 +1835,7 @@ class Plotter:
         if fig_title == None:
             fig_title = "{0}-{1} Fundamental Diagram".format(x_axis.title(), y_axis.title())
             fig_title = self.sim_label + fig_title
-            ax.set_title(fig_title, pad=20)
+        ax.set_title(fig_title, pad=20)
         ax.set_xlabel(axis_labels[x_axis.upper()])
         ax.set_ylabel(axis_labels[y_axis.upper()])
         ax.set_xlim(0, get_axis_lim(max_x))
@@ -1839,7 +1847,146 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def _add_grid(self, ax, zorder=1):
+    def plot_throughput(self, od_pair: list|tuple|None=None, vehicle_types: list|tuple|None=None, time_range: list|tuple|None=None, show_events: bool=True, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+        """
+        Plots vehicle throughput, ie. the rate of completed trips.
+        :param od_pair:         (n x 2) list containing OD pairs. If not given, all OD pairs are plotted
+        :param cumulative_hist: Denotes whether to plot histogram values cumulatively
+        :param vehicle_types:   List of vehicle types to include (defaults to all)
+        :param time_range:      Plotting time range (in plotter class units)
+        :param show_events:     Bool denoting whether to plot when events occur
+        :param plt_colour:      Line colour for plot (defaults to TUD 'blauw')
+        :param fig_title:       If given, will overwrite default title
+        :param save_fig:        Output image filename, will show image if not given
+        """
+
+        if self.simulation != None:
+            self.sim_data = self.simulation.__dict__()
+            self.units = self.simulation.units.name
+
+        if time_range == None: time_range = [-math.inf, math.inf]
+        else: time_range = convert_units(time_range, self.time_unit, "steps", self.sim_data["step_len"])
+
+        com_trip_data = self.sim_data["data"]["trips"]["completed"]
+
+        completion_times = []
+        for trip in com_trip_data.values():
+            origin, destination, arrival, veh_type = trip["origin"], trip["destination"], trip["arrival"], trip["vehicle_type"]
+
+            if vehicle_types != None and veh_type not in vehicle_types: continue
+            elif od_pair != None and origin != od_pair[0]: continue
+            elif od_pair != None and destination != od_pair[1]: continue
+            elif arrival <= time_range[0] or arrival >= time_range[1]: continue
+            else:
+                completion_times.append(trip["arrival"])
+
+        if len(completion_times) == 0:
+            desc = "No trip data to plot."
+            raise_error(ValueError, desc)
+
+        start = max(time_range[0], self.sim_data["start"])
+        end = min(time_range[1], self.sim_data["end"])
+
+        x_vals = list(range(start, end))
+        y_vals = [0] * len(x_vals)
+        for val in completion_times: y_vals[val] += 1
+
+        q1 = np.quantile(x_vals, 0.25)
+        q3 = np.quantile(x_vals, 0.75)
+        aggregation_steps = math.ceil((2 * (q3 - q1)) / (len(x_vals) ** (1 / 3)))
+        y_vals, x_vals = get_aggregated_data(y_vals, x_vals, aggregation_steps, False)
+    
+        x_vals, y_vals = [start]+x_vals, [0]+y_vals
+        agg_time = convert_units(aggregation_steps, "steps", "hours", self.sim_data["step_len"])
+        y_vals = [val / agg_time for val in y_vals]
+
+        fig, ax = plt.subplots(1, 1)
+
+        ax.plot(convert_units(x_vals, "steps", self.time_unit, self.sim_data["step_len"]), y_vals, color=self._get_colour(plt_colour), linewidth=1)
+        
+        if fig_title == None:
+            if od_pair == None: fig_title = "{0}Trip Throughput".format(self.sim_label)
+            else: fig_title = "{0}'{1}' → '{2}' Trip Throughput".format(self.sim_label, od_pair[0], od_pair[1])
+
+        ax.set_title(fig_title, pad=20)
+        ax.set_ylabel("Throughput (veh/hr)")
+        ax.set_xlabel(default_labels["sim_time"])
+        ax.set_xlim(convert_units([start, end], "steps", self.time_unit, self.sim_data["step_len"]))
+        ax.set_ylim([0, get_axis_lim(y_vals)])
+
+        fig.tight_layout()
+
+        self._add_grid(ax)
+
+        if "events" in self.sim_data["data"].keys() and show_events:
+            if "completed" in self.sim_data["data"]["events"]:
+                self._plot_event(ax)
+
+        self._display_figure(save_fig)
+
+    def plot_trip_time_histogram(self, od_pair: list|tuple|None=None, n_bins: int|None=None, cumulative_hist: bool=False, vehicle_types: list|tuple|None=None, time_range: list|tuple|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+        """
+        Plots a histogram for (completed) trip times, either network-wide or for a specific OD pair.
+        :param od_pair:         (n x 2) list containing OD pairs. If not given, all OD pairs are plotted
+        :param n_bins:          Number of bins in the histogram, calculated using the Freedman-Diaconis rule if not given
+        :param cumulative_hist: Denotes whether to plot histogram values cumulatively
+        :param vehicle_types:   List of vehicle types to include (defaults to all)
+        :param time_range:      Plotting time range (in plotter class units)
+        :param plt_colour:      Line colour for plot (defaults to TUD 'blauw')
+        :param fig_title:       If given, will overwrite default title
+        :param save_fig:        Output image filename, will show image if not given
+        """
+        
+        if self.simulation != None:
+            self.sim_data = self.simulation.__dict__()
+            self.units = self.simulation.units.name
+
+        if time_range == None: time_range = [-math.inf, math.inf]
+        else: time_range = convert_units(time_range, self.time_unit, "steps", self.sim_data["step_len"])
+
+        com_trip_data = self.sim_data["data"]["trips"]["completed"]
+
+        trip_times = []
+        for trip in com_trip_data.values():
+            origin, destination, veh_type = trip["origin"], trip["destination"], trip["vehicle_type"]
+            departure, arrival = trip["departure"], trip["arrival"]
+
+            if vehicle_types != None and veh_type not in vehicle_types: continue
+            elif od_pair != None and origin != od_pair[0]: continue
+            elif od_pair != None and destination != od_pair[1]: continue
+            elif departure <= time_range[0] or arrival >= time_range[1]: continue
+            else:
+                trip_times.append(convert_units(trip["arrival"] - trip["departure"], "steps", self.time_unit, self.sim_data["step_len"]))
+
+        if len(trip_times) == 0:
+            desc = "No trip data to plot."
+            raise_error(ValueError, desc)
+
+        fig, ax = plt.subplots(1, 1)
+
+        if n_bins == None:
+            q1 = np.quantile(trip_times, 0.25)
+            q3 = np.quantile(trip_times, 0.75)
+            bin_width = (2 * (q3 - q1)) / (len(trip_times) ** (1 / 3))
+            n_bins = math.ceil((max(trip_times) - min(trip_times)) / bin_width)
+
+        ax.hist(trip_times, n_bins, color=self._get_colour(plt_colour), cumulative=cumulative_hist, zorder=2)
+        
+        if fig_title == None:
+            if od_pair == None: fig_title = "{0}Trip Time Distribution".format(self.sim_label)
+            else: fig_title = "{0}'{1}' → '{2}' Trip Time Distribution".format(self.sim_label, od_pair[0], od_pair[1])
+
+        ax.set_title(fig_title, pad=20)
+        ax.set_ylabel("Frequency")
+        ax.set_xlabel(default_labels[self.time_unit])
+        ax.set_ylim(0, get_axis_lim(ax.get_ylim()[1]))
+
+        fig.tight_layout()
+
+        self._add_grid(ax)
+        self._display_figure(save_fig)
+
+    def _add_grid(self, ax, zorder=0):
         ax.grid(True, 'both', color='grey', linestyle='dashed', linewidth=0.5, zorder=zorder)
         
     def _get_colour(self, colour: str|int|None=None, reset_wheel: bool=False) -> str:
@@ -1878,7 +2025,7 @@ class Plotter:
                 raise_error(ValueError, desc)
 
         else:
-            desc = "Invalid line_colour '{0}' (must be 'str', not '{1}').".format(colour, type(colour).__name__)
+            desc = "Invalid plt_colour '{0}' (must be 'str', not '{1}').".format(colour, type(colour).__name__)
             raise_error(TypeError, desc)
         
         return colour
