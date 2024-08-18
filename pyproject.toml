@@ -41,7 +41,6 @@ test = [
 [project.urls]
 Documentation = "https://tud-sumo.github.io/docs/"
 Repository = "https://github.com/tud-sumo/tud-sumo"
-"Example Code" = "https://github.com/tud-sumo/example"
 
 [tool.hatch.version]
 path = "tud_sumo/__init__.py"

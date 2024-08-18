@@ -88,14 +88,20 @@ def validate_list_types(values, valid_types, element_wise=False, param_name=None
         invalid = True
         if not return_validity:
             if desc == None: desc = "Invalid {0} (must be '[list|tuple]', not '{1}').".format(param_name, type(values).__name__)
-            caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+            if 'self' in inspect.currentframe().f_back.f_locals:
+                caller = inspect.currentframe().f_back.f_locals['self'].__name__() + "."
+            else: caller = ""
+            caller += "{0}()".format(inspect.currentframe().f_back.f_code.co_name)
             error_msg = "{0}: {1}".format(caller, desc)
             if curr_sim_step != None: error_msg = "(step {0}) ".format(curr_sim_step) + error_msg
             raise TypeError(error_msg)
     
     if invalid and not return_validity:
         if desc == None: desc = "Invalid value found in {0} at idx {1} (must be '{3}', '{2}' is '{4}').".format(param_name, inv_idx, inv_val, _get_type_str(valid_types, "|"), type(value).__name__)
-        caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+        if 'self' in inspect.currentframe().f_back.f_locals:
+            caller = inspect.currentframe().f_back.f_locals['self'].__name__() + "."
+        else: caller = ""
+        caller += "{0}()".format(inspect.currentframe().f_back.f_code.co_name)
         error_msg = "{0}: {1}".format(caller, desc)
         if curr_sim_step != None: error_msg = "(step {0}) ".format(curr_sim_step) + error_msg
         raise TypeError(error_msg)
@@ -111,7 +117,10 @@ def validate_type(value, valid_types, param_name=None, curr_sim_step=None, retur
             param_name = param_name if param_name != None else "input"
             val_str = "" if len(str(value)) >= 20 else "'{0}' ".format(value)
             desc = "Invalid {0} {1}(must be '{2}', not '{3}').".format(param_name, val_str, _get_type_str(valid_types, "|"), type(value).__name__)
-            caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+            if 'self' in inspect.currentframe().f_back.f_locals:
+                caller = inspect.currentframe().f_back.f_locals['self'].__name__() + "."
+            else: caller = ""
+            caller += "{0}()".format(inspect.currentframe().f_back.f_code.co_name)
             error_msg = "{0}: {1}".format(caller, desc)
             if curr_sim_step != None: error_msg = "(step {0}) ".format(curr_sim_step) + error_msg
             raise TypeError(error_msg)
@@ -120,13 +129,19 @@ def validate_type(value, valid_types, param_name=None, curr_sim_step=None, retur
     else: return value
 
 def raise_error(error, desc, curr_sim_step=None):
-    caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+    if 'self' in inspect.currentframe().f_back.f_locals:
+        caller = inspect.currentframe().f_back.f_locals['self'].__name__() + "."
+    else: caller = ""
+    caller += "{0}()".format(inspect.currentframe().f_back.f_code.co_name)
     error_msg = "{0}: {1}".format(caller, desc)
     if curr_sim_step != None: error_msg = "(step {0}) ".format(curr_sim_step) + error_msg
     raise error(error_msg)
 
 def raise_warning(desc, curr_sim_step=None):
-    caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
+    if 'self' in inspect.currentframe().f_back.f_locals:
+        caller = inspect.currentframe().f_back.f_locals['self'].__name__() + "."
+    else: caller = ""
+    caller += "{0}()".format(inspect.currentframe().f_back.f_code.co_name)
     warning_msg = "(WARNING) {0}: {1}".format(caller, desc)
     if curr_sim_step != None: warning_msg = "(step {0}) ".format(curr_sim_step) + warning_msg
     print(warning_msg)

@@ -407,14 +407,15 @@ class Simulation:
             raise_error(ValueError, desc, self.curr_step)
 
         if vehicle_types != None:
-            vehicle_types = validate_list_types(vehicle_types, str, param_name="vehicle_types", curr_sim_step=self.curr_step)
+            vehicle_types = validate_type(vehicle_types, (str, list, tuple), param_name="vehicle_types", curr_sim_step=self.curr_step)
             if isinstance(vehicle_types, (list, tuple)):
+                vehicle_types = validate_list_types(vehicle_types, str, param_name="vehicle_types", curr_sim_step=self.curr_step)
                 for type_id in vehicle_types:
                     if not self.vehicle_type_exists(type_id):
                         desc = "Unknown vehicle type ID '{0}' in vehicle_types.".format(type_id)
                         raise_error(KeyError, desc, self.curr_step)
-            elif isinstance(vehicle_types, str) and not self.vehicle_type_exists(vehicle_types):
-                desc = "Unknown vehicle type ID '{0}' in vehicle_types.".format(vehicle_types)
+            elif not self.vehicle_type_exists(vehicle_types):
+                desc = "Unknown vehicle_types ID '{0}' given.".format(vehicle_types)
                 raise_error(KeyError, desc, self.curr_step)
         
         if vehicle_type_dists != None and vehicle_types == None:
@@ -490,7 +491,7 @@ class Simulation:
             return self._demand_headers, self._demand_arrs
         else: return None
 
-    def add_tracked_junctions(self, juncs: str|list|dict|None = None) -> None:
+    def add_tracked_junctions(self, juncs: str|list|tuple|dict|None = None) -> None:
         """
         Initalise junctions and start tracking states and flows. Defaults to all
         junctions with traffic lights.
@@ -503,7 +504,7 @@ class Simulation:
             track_list, junc_params = self._all_tls, None
         else:
             
-            juncs = validate_type(juncs, (str, list, dict), "juncs", self.curr_step)
+            juncs = validate_type(juncs, (str, list, tuple, dict), "juncs", self.curr_step)
             if isinstance(juncs, dict):
                 junc_ids, junc_params = list(juncs.keys()), juncs
             elif isinstance(juncs, (list, tuple)):
@@ -767,7 +768,9 @@ class Simulation:
                 if len(all_data["data"]["detectors"]) == 0:
                     for detector_id in detector_list:
                         all_data["data"]["detectors"][detector_id] = self.available_detectors[detector_id]
-                        all_data["data"]["detectors"][detector_id].update({"speeds": [], "vehicle_counts": [], "vehicle_ids": [], "occupancies": []})
+                        all_data["data"]["detectors"][detector_id].update({"speeds": [], "vehicle_counts": [], "vehicle_ids": []})
+                        if self.available_detectors[detector_id]["type"] == "inductionloop":
+                            all_data["data"]["detectors"][detector_id]["occupancies"] = []
 
                 for detector_id in last_step_data["detectors"].keys():
                     if detector_id not in all_data["data"]["detectors"].keys():
@@ -1227,14 +1230,15 @@ class Simulation:
         
         return all_data_vals
 
-    def get_interval_detector_data(self, detector_id: int|str, n_steps: int, data_keys: str|list, avg_vals: bool = False) -> float|dict:
+    def get_interval_detector_data(self, detector_id: int|str, n_steps: int, data_keys: str|list, avg_vals: bool = False, interval_end: int = 0) -> float|dict:
         """
         Get data previously collected by a detector over range (curr step - n_step -> curr_step).
-        :param detector_id: Detector ID
-        :param n_steps:     Interval length in steps (max at number of steps the simulation has run)
-        :param data_keys:   List of keys from [vehicle_counts|speeds|occupancy (induction loop only)], or single key
-        :param avg_bool:    Bool denoting whether to average values
-        :return float|dict: Either single value or dict containing values by data_key
+        :param detector_id:  Detector ID
+        :param n_steps:      Interval length in steps (max at number of steps the simulation has run)
+        :param data_keys:    List of keys from [vehicle_counts|speeds|occupancies (induction loop only)], or single key
+        :param avg_bool:     Bool denoting whether to average values
+        :param interval_end: Steps since end of interval (0 = current step)
+        :return float|dict:  Either single value or dict containing values by data_key
         """
 
         if self._all_data == None:
@@ -1249,7 +1253,12 @@ class Simulation:
         for data_key in data_keys:
             if data_key in ["vehicle_counts", "speeds", "occupancies"]:
                 if data_key in self._all_data["data"]["detectors"][detector_id].keys():
-                    data_arr = self._all_data["data"]["detectors"][detector_id][data_key][-n_steps:]
+                    data = self._all_data["data"]["detectors"][detector_id][data_key]
+                    if len(data) < n_steps + interval_end:
+                        desc = "Not enough data (n_steps '{0}' + interval_end '{1}' > '{2}').".format(n_steps, interval_end, len(data))
+                        raise_error(ValueError, desc, self.curr_step)
+                    if interval_end <= 0: data_arr = data[-n_steps:]
+                    else: data_arr = data[-(n_steps + interval_end):-interval_end]
                     if avg_vals: data_arr = sum(data_arr) / len(data_arr)
                 else:
                     desc = "Detector '{0}' of type '{1}' does not collect '{2}' data.".format(detector_id, self._all_data["data"]["detectors"][detector_id]["type"], data_key)
@@ -2924,6 +2933,7 @@ def print_sim_data_struct(sim_data: Simulation|dict|str) -> None:
     :param sim_data: Either Simulation object, dictionary or sim_data filepath
     """
     
+    sim_data = validate_type(sim_data, (str, dict, Simulation), "sim_data")
     if isinstance(sim_data, Simulation):
         dictionary = sim_data.__dict__()
     elif isinstance(sim_data, dict):
@@ -2939,9 +2949,6 @@ def print_sim_data_struct(sim_data: Simulation|dict|str) -> None:
         if os.path.exists(sim_data):
             with open(sim_data, r_mode) as fp:
                 dictionary = r_class.load(fp)
-    else:
-        desc = "Invalid sim_data type (must be [Simulation|dict|str, not '{0}'])".format(type(sim_data).__name__)
-        raise_error(TypeError, desc)
 
     _print_dict({dictionary["scenario_name"]: dictionary})
 
@@ -3004,9 +3011,13 @@ def _get_2d_shape(array):
 class TrackedJunction:
     def __init__(self, junc_id: str|int, sim: Simulation, junc_params: dict|str=None) -> None:
         self.id = junc_id
-        self.position = traci.junction.getPosition(junc_id)
-
         self.sim = sim
+
+        node = self.sim.network.getNode(junc_id)
+        self.incoming_edges = [e.getID() for e in node.getIncoming()]
+        self.outgoing_edges = [e.getID() for e in node.getOutgoing()]
+        self.position = traci.junction.getPosition(junc_id)
+        
         self.init_time = sim.curr_step
         self.curr_time = sim.curr_step
 
@@ -3120,7 +3131,8 @@ class TrackedJunction:
         :return dict: TrackedJunction data dictionary
         """
 
-        junc_dict = {"position": self.position, "init_time": self.init_time, "curr_time": self.curr_time}
+        junc_dict = {"position": self.position, "incoming_edges": self.incoming_edges, "outgoing_edges": self.outgoing_edges,
+                     "init_time": self.init_time, "curr_time": self.curr_time}
         
         if self.has_tl: junc_dict["tl"] = {"m_len": self.m_len, "avg_green": self.avg_green, "avg_red": self.avg_red,
                                            "avg_m_green": self.avg_m_green, "avg_m_red": self.avg_m_red, "m_phases": self.durations}
@@ -3355,14 +3367,12 @@ def print_summary(sim_data, save_file=None, tab_width=58):
     """
     caller = "{0}()".format(inspect.stack()[0][3])
     if save_file != None:
-        if isinstance(save_file, str):
-            if not save_file.endswith(".txt"): save_file += ".txt"
-            old_stdout = sys.stdout
-            sys.stdout = buffer = io.StringIO()
-        else:
-            desc = "{0}: Invalid save_file type (must be 'str', not '{1}').".format(caller, type(save_file).__name__)
-            raise TypeError(desc)
+        save_file = validate_type(save_file, str, "save_file")
+        if not save_file.endswith(".txt"): save_file += ".txt"
+        old_stdout = sys.stdout
+        sys.stdout = buffer = io.StringIO()
     
+    sim_data = validate_type(sim_data, (str, dict), "sim_data")
     if isinstance(sim_data, str):
         if sim_data.endswith(".json"): r_class, r_mode = json, "r"
         elif sim_data.endswith(".pkl"): r_class, r_mode = pkl, "rb"
@@ -3376,9 +3386,6 @@ def print_summary(sim_data, save_file=None, tab_width=58):
         else:
             desc = "{0}: sim_data file '{1}' not found.".format(caller, sim_data)
             raise FileNotFoundError(desc)
-    elif not isinstance(sim_data, dict):
-        desc = "{0}: Invalid sim_data type (must be [str|dict], not '{1}').".format(caller, type(sim_data).__name__)
-        raise TypeError(desc)
     elif len(sim_data.keys()) == 0 or "data" not in sim_data.keys():
         desc = "{0}: Invalid sim_data (no data found)."
         raise ValueError(desc)

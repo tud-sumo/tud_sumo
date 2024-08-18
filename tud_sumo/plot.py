@@ -1888,8 +1888,8 @@ class Plotter:
         end = min(time_range[1], self.sim_data["end"])
 
         x_vals = list(range(start, end))
-        y_vals = [0] * len(x_vals)
-        for val in completion_times: y_vals[val] += 1
+        y_vals = [0] * (len(x_vals) + 1)
+        for val in completion_times: y_vals[val + start] += 1
 
         q1 = np.quantile(x_vals, 0.25)
         q3 = np.quantile(x_vals, 0.75)
