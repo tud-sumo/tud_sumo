@@ -123,8 +123,8 @@ class Plotter:
         self._default_colour = self.line_colours[self._default_colour_idx]
         self._next_colour_idx = 0
 
-    def __name__(self):
-        return "Plotter"
+    def __str__(self): return "<{0}>".format(self.__name__)
+    def __name__(self): return "Plotter"
     
     def _display_figure(self, filename: str|None=None) -> None:
         """

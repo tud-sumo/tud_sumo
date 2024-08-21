@@ -28,6 +28,7 @@ class EventScheduler:
 
         return schedule_dict
     
+    def __str__(self): return "<{0}>".format(self.__name__)
     def __name__(self): return "EventScheduler"
 
     def get_event_ids(self, event_statuses=None):
@@ -228,6 +229,7 @@ class Event:
             
         return event_dict
     
+    def __str__(self): return "<{0}: '{1}'>".format(self.__name__, self.id)
     def __name__(self): return "Event"
 
     def start(self):

@@ -36,7 +36,7 @@ class VSLController:
 
         self.speed_limit = None if "default_limit" not in vsl_params.keys() else vsl_params["default_limit"]
 
-    def __str__(self): return "<VSLController: '{0}'>".format(self.id)
+    def __str__(self): return "<{0}: '{1}'>".format(self.__name__, self.id)
     def __name__(self): return "VSLController"
 
     def __dict__(self) -> dict:
@@ -160,7 +160,7 @@ class RGController:
                 raise_error(KeyError, desc, self.sim.curr_step)
             else: self.detector_info[detector_id] = {"location": self.sim.get_detector_vals(detector_id, "position")}
 
-    def __str__(self): return "<RGController: '{0}'>".format(self.id)
+    def __str__(self): return "<{0}: '{1}'>".format(self.__name__, self.id)
     def __name__(self): return "RGController"
 
     def __dict__(self) -> dict:
