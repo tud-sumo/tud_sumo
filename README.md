@@ -1,8 +1,8 @@
 # TU Delft SUMO Wrapper
 
+![logos](header.png)
+
 <p align="center">
-  <img src="img/header.png"/>
-  <br><br>
   <a href="https://pypi.org/project/tud-sumo/">
     <img alt="PyPI" src="https://img.shields.io/pypi/v/tud-sumo?style=for-the-badge&logo=pypi&logoColor=%23FFFFFF&color=%2300A6D6"/>
   </a>
@@ -23,7 +23,7 @@
 
 Python SUMO wrapper, using traci, written for the DAIMoND Lab at TU Delft by Callum Evans. The full documentation & examples can be found at [tud-sumo.github.io/docs/](https://tud-sumo.github.io/docs/). Example code can be found at [github.com/tud-sumo/example](https://github.com/tud-sumo/example).<br><br>
 
-![logos](img/logos.png)
+![logos](logos.png)
 
 ## Requirements 
 
