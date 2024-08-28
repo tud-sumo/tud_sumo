@@ -2,7 +2,7 @@
 
 ![logos](header.png)
 
-<p style="text-align: center;">
+<p align="center">
   <a href="https://pypi.org/project/tud-sumo/">
     <img alt="PyPI" src="https://img.shields.io/pypi/v/tud-sumo?style=for-the-badge&logo=pypi&logoColor=%23FFFFFF&color=%2300A6D6"/>
   </a>
@@ -31,4 +31,4 @@ Python 3.10 or later is required. Dependencies are; `tqdm`, `matplotlib`, `mpl-t
 
 ## Contact Information
 
-TUD-SUMO is developed by Callum Evans in the DAIMoND lab of TU Delft. For any questions, feedback or bug reports, please contact Callum Evans or submit a query using the form [here](https://forms.office.com/e/pMnGaheier).
+TUD-SUMO is developed in the DAIMoND lab of TU Delft. For any questions or feedback, please contact Callum Evans at _c.evans@tudelft.nl_. Bug reports can be created in the GitHub repository: [github.com/tud-sumo/tud_sumo](https://github.com/tud-sumo/tud_sumo/).
