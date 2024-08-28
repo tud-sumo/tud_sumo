@@ -86,7 +86,7 @@ class Simulation:
 
     def __dict__(self): return {} if self._all_data == None else self._all_data
 
-    def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, cmd_options: list|None = None, units: str|int = 1, get_individual_vehicle_data: bool = True, automatic_subscriptions: bool = True, suppress_warnings: bool = False, suppress_traci_warnings: bool = True, seed: str = "random", gui: bool = False) -> None:
+    def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, cmd_options: list|None = None, units: str|int = 1, get_individual_vehicle_data: bool = True, automatic_subscriptions: bool = True, suppress_warnings: bool = False, suppress_traci_warnings: bool = True, suppress_pbar: bool = False, seed: str = "random", gui: bool = False) -> None:
         """
         Intialises SUMO simulation.
         :param config_file:                 Location of '.sumocfg' file (can be given instead of net_file)
@@ -99,6 +99,7 @@ class Simulation:
         :param automatic_subscriptions:     Denotes whether to automatically subscribe to commonly used vehicle data (speed and position, defaults to True)
         :param suppress_warnings:           Suppress simulation warnings
         :param suppress_traci_warnings:     Suppress warnings from TraCI
+        :param suppress_pbar:               Suppress automatic progress bar when not using the GUI
         :param seed:                        Either int to be used as seed, or random.random()/random.randint(), where a random seed is used
         :param gui:                         Bool denoting whether to run GUI
         """
@@ -203,6 +204,7 @@ class Simulation:
         self._automatic_subscriptions = automatic_subscriptions
 
         self._suppress_warnings = suppress_warnings
+        self._suppress_pbar = suppress_pbar
 
         self._sim_start_time = get_time_str()
 
@@ -737,21 +739,22 @@ class Simulation:
 
         create_pbar = False
 
-        if self._gui: create_pbar = False
-        elif pbar_max_steps != None:
-            if isinstance(pbar_max_steps, (int, float)):
-                if pbar_max_steps < 0:
-                    create_pbar = False
-                    self._pbar, self._pbar_length = None, None
-                elif pbar_max_steps != self._pbar_length:
-                    create_pbar, self._pbar_length = True, pbar_max_steps
-                    
-            else:
-                desc = "Invalid pbar_max_steps '{0}' (must be 'int', not '{1}').".format(pbar_max_steps, type(pbar_max_steps).__name__)
-                raise_error(TypeError, desc, self.curr_step)
-        
-        elif not isinstance(self._pbar, tqdm) and not self._gui and n_steps >= 10:
-            create_pbar, self._pbar_length = True, n_steps
+        if not self._suppress_pbar:
+            if self._gui: create_pbar = False
+            elif pbar_max_steps != None:
+                if isinstance(pbar_max_steps, (int, float)):
+                    if pbar_max_steps < 0:
+                        create_pbar = False
+                        self._pbar, self._pbar_length = None, None
+                    elif pbar_max_steps != self._pbar_length:
+                        create_pbar, self._pbar_length = True, pbar_max_steps
+                        
+                else:
+                    desc = "Invalid pbar_max_steps '{0}' (must be 'int', not '{1}').".format(pbar_max_steps, type(pbar_max_steps).__name__)
+                    raise_error(TypeError, desc, self.curr_step)
+            
+            elif not isinstance(self._pbar, tqdm) and not self._gui and n_steps >= 10:
+                create_pbar, self._pbar_length = True, n_steps
 
         if create_pbar:
             self._pbar = tqdm(desc="Simulating (step {0}, {1} vehs)".format(self.curr_step, len(self._all_curr_vehicle_ids)), total=self._pbar_length)
@@ -1139,7 +1142,7 @@ class Simulation:
         """
         Get data values from a specific detector using a list of data keys.
         :param detector_ids: Detector ID or list of IDs
-        :param data_keys:    List of keys from [type|position|vehicle_count|vehicle_ids|lsm_speed|halting_no (MEE only)|lsm_occupancy (IL only)|last_detection (IL only)], or single key
+        :param data_keys:    List of keys from [type|position|vehicle_count|vehicle_ids|lsm_speed|halting_no (MEE only)|lsm_occupancy (IL only)|last_detection (IL only)|avg_vehicle_length (IL only)], or single key
         :return dict:        Values by data_key (or single value)
         """
 
@@ -1220,6 +1223,10 @@ class Simulation:
                                     if tc.LAST_STEP_TIME_SINCE_DETECTION in subscribed_data: last_detection = subscribed_data[tc.LAST_STEP_TIME_SINCE_DETECTION]
                                     else: last_detection = d_class.getTimeSinceDetection(detector_id)
                                     detector_data[data_key] = last_detection
+                                elif data_key == "avg_vehicle_length":
+                                    vehicle_len = d_class.getLastStepMeanLength(detector_id)
+                                    if self.units.name == "IMPERIAL": vehicle_len = convert_units(vehicle_len, "metres", "feet")
+                                    detector_data[data_key] = vehicle_len
             
             if len(detector_ids) == 1:
                 if len(data_keys) == 1: return detector_data[data_keys[0]]
@@ -1230,119 +1237,46 @@ class Simulation:
         
         return all_data_vals
 
-    def get_interval_detector_data(self, detector_ids: int|str, n_steps: int, data_keys: str|list, interval_end: int = 0, avg_step_vals: bool = False, avg_det_vals: bool = False, unique_count: bool = False) -> float|list|dict:
+    def get_interval_detector_data(self, detector_id: int|str, n_steps: int, data_keys: str|list, avg_vals: bool = False, interval_end: int = 0) -> float|dict:
         """
-        Get data previously collected by a detector over range (curr step - n_step - interval_end -> curr_step - interval_end).
-        :param detector_ids:  Detector ID or list of IDs
-        :param n_steps:       Interval length in steps (max at number of steps the simulation has run)
-        :param data_keys:     List of keys from ['flows'|'densities'|'speeds'|'vehicle_counts'|'occupancies' (induction loop only)], or single key
-        :param interval_end:  Steps since end of interval (0 = current step)
-        :param avg_step_vals: Bool denoting whether to return an average value across the interval (not 'flows' or 'densities')
-        :param avg_det_vals:  Bool denoting whether to return values averaged for all detectors
-        :param unique_count:  Assert vehicles are only counted once in vehicle_counts (throughout the interval)
-        :return float|dict:   Either single value or dict containing values by data_key
+        Get data previously collected by a detector over range (curr step - n_step -> curr_step).
+        :param detector_id:  Detector ID
+        :param n_steps:      Interval length in steps (max at number of steps the simulation has run)
+        :param data_keys:    List of keys from [vehicle_counts|speeds|occupancies (induction loop only)], or single key
+        :param avg_bool:     Bool denoting whether to average values
+        :param interval_end: Steps since end of interval (0 = current step)
+        :return float|dict:  Either single value or dict containing values by data_key
         """
 
         if self._all_data == None:
             desc = "No detector data as the simulation has not been run or data has been reset."
             raise_error(SimulationError, desc, self.curr_step)
-        elif n_steps + interval_end > self._all_data["end"] - self._all_data["start"]:
-            desc = "Not enough data (n_steps '{0}' + interval_end '{1}' > '{2}').".format(n_steps, interval_end, len(data))
-            raise_error(ValueError, desc, self.curr_step)
+        elif detector_id not in self.available_detectors.keys() or detector_id not in self._all_data["data"]["detectors"].keys():
+            desc = "Detector with ID '{0}' not found.".format(detector_id)
+            raise_error(KeyError, desc, self.curr_step)
 
-        all_data_vals = {}
-        if isinstance(detector_ids, str): detector_ids = [detector_ids]
-        detector_ids = validate_list_types(detector_ids, str, param_name="detector_ids", curr_sim_step=self.curr_step)
-
-        if isinstance(data_keys, str): data_keys = [data_keys]
-        data_keys = validate_list_types(data_keys, str, param_name="data_keys", curr_sim_step=self.curr_step)
-
-        for detector_id in detector_ids:
-            if detector_id not in self._all_data["data"]["detectors"].keys():
-                desc = "Detector with ID '{0}' not found.".format(detector_id)
-                raise_error(KeyError, desc, self.curr_step)
-
+        detector_data = {}
+        if not isinstance(data_keys, (list, tuple)): data_keys = [data_keys]
         for data_key in data_keys:
-            for detector_id in detector_ids:
-                if detector_id in self._all_data["data"]["detectors"].keys():
-                    if data_key in ["speeds", "occupancies"] or (data_key == "vehicle_counts" and not unique_count):
-                        data = self._all_data["data"]["detectors"][detector_id][data_key]
-
-                        if interval_end <= 0: val = data[-n_steps:]
-                        else: val = data[-(n_steps + interval_end):-interval_end]
-
-                        if data_key in ["occupancies", "vehicle_counts"] and avg_step_vals:
-                            val = sum(val) / len(val)
-                        elif avg_step_vals:
-                            val = [x for x in val if x >= 0]
-                            val = sum(val) / len(val) if len(val) > 0 else -1
-                    
-                    elif data_key in ["flows", "densities"] or (data_key == "vehicle_counts" and unique_count):
-                        
-                        veh_ids = self._all_data["data"]["detectors"][detector_id]["vehicle_ids"]
-
-                        if interval_end <= 0: interval_ids = veh_ids[-n_steps:]
-                        else: interval_ids = veh_ids[-(n_steps + interval_end):-interval_end]
-
-                        step_counts, known_ids = [], set([])
-                        for step_data in interval_ids:
-                            step_ids = set(step_data)
-                            step_counts.append(len(step_ids - known_ids))
-                            known_ids = known_ids.union(step_ids)
-
-                        if data_key == "vehicle_counts":
-                            val = sum(step_counts) / len(step_counts) if avg_step_vals else step_counts
-
-                        elif data_key in ["flows", "densities"]:
-                            flow = sum(step_counts) / convert_units(n_steps, "steps", "hours", self.step_length)
-                            
-                            if data_key == "densities" and flow > 0:
-                                if interval_end <= 0: speeds = self._all_data["data"]["detectors"][detector_id]["speeds"][-n_steps:]
-                                else: speeds = self._all_data["data"]["detectors"][detector_id]["speeds"][-(n_steps + interval_end):-interval_end]
-
-                                speeds = [x for x in speeds if x >= 0]
-                                speed = sum(speeds) / len(speeds)
-                                if self.units.name == "UK": speed = convert_units(speed, "mph", "kmph")
-                                val = flow / speed
-                                
-                            else: val = flow
-
-                    else:
-                        desc = "Unsupported data key ('{0}').".format(data_key)
-                        raise_error(KeyError, desc, self.curr_step)
+            if data_key in ["vehicle_counts", "speeds", "occupancies"]:
+                if data_key in self._all_data["data"]["detectors"][detector_id].keys():
+                    data = self._all_data["data"]["detectors"][detector_id][data_key]
+                    if len(data) < n_steps + interval_end:
+                        desc = "Not enough data (n_steps '{0}' + interval_end '{1}' > '{2}').".format(n_steps, interval_end, len(data))
+                        raise_error(ValueError, desc, self.curr_step)
+                    if interval_end <= 0: data_arr = data[-n_steps:]
+                    else: data_arr = data[-(n_steps + interval_end):-interval_end]
+                    if avg_vals: data_arr = sum(data_arr) / len(data_arr)
                 else:
-                    desc = "Detector with ID '{0}' not found.".format(detector_id)
+                    desc = "Detector '{0}' of type '{1}' does not collect '{2}' data.".format(detector_id, self._all_data["data"]["detectors"][detector_id]["type"], data_key)
                     raise_error(KeyError, desc, self.curr_step)
+            else:
+                desc = "Unrecognised data key ('{0}').".format(data_key)
+                raise_error(KeyError, desc, self.curr_step)
+            detector_data[data_key] = data_arr
 
-                if len(data_keys) > 1:
-                    if detector_id not in all_data_vals: all_data_vals[detector_id] = {}
-                    all_data_vals[detector_id][data_key] = val
-
-                else: all_data_vals[detector_id] = val
-        
-        if len(all_data_vals) == 1: return all_data_vals[detector_ids[0]]
-        elif avg_det_vals:
-            avg_vals = {}
-            for data_key in data_keys:
-
-                if len(data_keys) > 1: all_vals = [det_data[data_key] for det_data in all_data_vals.values()] 
-                else: all_vals = list(all_data_vals.values())
-
-                if isinstance(all_vals[0], list):
-                    vals = []
-                    for i in range(len(all_vals[0])):
-                        step_vals = [all_vals[j][i] for j in range(len(all_vals)) if all_vals[j][i] >= 0]
-                        if len(step_vals) > 0: vals.append(sum(step_vals) / len(step_vals))
-                        else: vals.append(-1)
-                    avg_vals[data_key] = vals
-                    
-                else:
-                    avg_vals[data_key] = sum(all_vals) / len(all_vals)
-
-            if len(data_keys) > 1: return avg_vals
-            else: return avg_vals[data_keys[0]]
-
-        else: return all_data_vals
+        if len(data_keys) == 1: return detector_data[data_keys[0]]
+        else: return detector_data
 
     def set_phases(self, new_junc_phases: dict, start_phase: int = 0, overwrite: bool = True) -> None:
         """
@@ -2573,7 +2507,7 @@ class Simulation:
     def get_geometry_vals(self, geometry_ids: str|int, data_keys: str|list) -> dict|str|int|float|list:
         """
         Get data values for specific edge or lane using a list of data keys, from: (edge or lane) vehicle_count,
-        vehicle_ids, vehicle_speed, halting_no, vehicle_occupancy, curr_travel_time, ff_travel_time, emissions,
+        vehicle_ids, vehicle_speed, avg_vehicle_length,  halting_no, vehicle_occupancy, curr_travel_time, ff_travel_time, emissions,
         length, max_speed | (edge only) connected_edges, incoming_edges, outgoing_edges, street_name, n_lanes,
         lane_ids | (lane only) edge_id, n_links, allowed, disallowed, left_lc, right_lc
         :param geometry_ids: Either edge or lane ID or list of edge or lane IDs
@@ -2625,6 +2559,13 @@ class Simulation:
 
                         units = "kmph" if self.units.name == "METRIC" else "mph"
                         data_vals[data_key] = convert_units(vehicle_speed, "m/s", units)
+                        continue
+
+                    case "avg_vehicle_length":
+                        if tc.LAST_STEP_LENGTH in subscribed_data: length = subscribed_data[tc.LAST_STEP_LENGTH]
+                        else: length = g_class.getLastStepLength(geometry_id)
+                        units = convert_units(length, "metres", "feet") if self.units.name == "IMPERIAL" else length
+                        data_vals[data_key] = length
                         continue
                     
                     case "halting_no":
@@ -3360,6 +3301,7 @@ class TrackedEdge:
         self.flows = []
         self.speeds = []
         self.densities = []
+        self.occupancies = []
 
         self.sim.add_geometry_subscriptions(self.id, "vehicle_ids")
 
@@ -3380,6 +3322,7 @@ class TrackedEdge:
                      "flows": self.flows,
                      "speeds": self.speeds,
                      "densities": self.densities,
+                     "occupancies": self.occupancies,
                      "init_time": self.init_time,
                      "curr_time": self.curr_time}
         
@@ -3394,9 +3337,10 @@ class TrackedEdge:
         self.curr_time = self.sim.curr_step
 
         self.step_vehicles = []
+        self.flows = []
         self.speeds = []
         self.densities = []
-        self.flows = []
+        self.occupancies = []
 
     def update(self) -> None:
         
@@ -3415,6 +3359,7 @@ class TrackedEdge:
 
         n_vehicles = len(veh_data)
 
+        occupancy = self.sim.get_geometry_vals(self.id, "vehicle_occupancy")
         speed = -1 if n_vehicles == 0 else total_speed / n_vehicles
         if speed != -1 and self.sim.units == "UK": speed = convert_units(speed, "mph", "kmph")
         density = -1 if n_vehicles == 0 else n_vehicles / self.length
@@ -3423,6 +3368,7 @@ class TrackedEdge:
         self.flows.append(flow)
         self.speeds.append(speed)
         self.densities.append(density)
+        self.occupancies.append(occupancy)
             
     def _get_distance_on_road(self, veh_coors):
         line = LineString(self.linestring)

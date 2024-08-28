@@ -1702,17 +1702,20 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def plot_fundamental_diagram(self, edge_ids: list|tuple|str|None=None, x_axis: str="density", y_axis: str="flow", x_percentile: int=100, y_percentile: int=100, separate_edges: bool=False, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_fundamental_diagram(self, edge_ids: list|tuple|str|None=None, x_axis: str="density", y_axis: str="flow", x_percentile: int=100, y_percentile: int=100, aggregation_steps: int=0, separate_edges: bool=False, time_range: list|tuple|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot a fundamental diagram from tracked egde data.
-        :param edge_ids:       Single tracked edge ID or list of IDs
-        :param x_axis:         x-axis variable ('s'|'f'|'d'|'speed'|'flow'|'density')
-        :param y_axis:         y-axis variable ('s'|'f'|'d'|'speed'|'flow'|'density')
-        :param x_percentile:   x-axis value plotting percentile
-        :param y_percentile:   y-axis value plotting percentile
-        :param separate_edges: If True, individual edges are plotted with separate colours
-        :param fig_title:      If given, will overwrite default title
-        :param save_fig:       Output image filename, will show image if not given
+        :param edge_ids:          Single tracked edge ID or list of IDs
+        :param x_axis:            x-axis variable ('s'|'f'|'d'|'speed'|'flow'|'density')
+        :param y_axis:            y-axis variable ('s'|'f'|'d'|'speed'|'flow'|'density')
+        :param x_percentile:      x-axis value plotting percentile [1-100]
+        :param y_percentile:      y-axis value plotting percentile [1-100]
+        :param aggregation_steps: If given, values are aggregated using this interval
+        :param separate_edges:    If True, individual edges are plotted with separate colours
+        :param time_range:        Plotting time range (in plotter class units)
+        :param plt_colour:        Line colour for plot (defaults to TUD 'blauw')
+        :param fig_title:         If given, will overwrite default title
+        :param save_fig:          Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -1733,97 +1736,92 @@ class Plotter:
 
         axes = {"S": "speed", "F": "flow", "D": "density"}
         if not isinstance(x_axis, str) or x_axis.upper() not in ["S", "F", "D", "SPEED", "FLOW", "DENSITY"]:
-            desc = "Invalid x_axis '{0}' (must be ['s'|'f'|'d'|'speed'|'flow'|'density'])."
+            desc = "Invalid x_axis '{0}' (must be ['s'|'f'|'d'|'speed'|'flow'|'density']).".format(x_axis)
             error = TypeError if not isinstance(x_axis, str) else ValueError
             raise_error(error, desc)
         elif x_axis in ['s', 'f', 'd']: x_axis = axes[x_axis.upper()]
 
         if not isinstance(y_axis, str) or y_axis.upper() not in ["S", "F", "D", "SPEED", "FLOW", "DENSITY"]:
-            desc = "Invalid y_axis '{0}' (must be ['s'|'f'|'d'|'speed'|'flow'|'density'])."
+            desc = "Invalid y_axis '{0}' (must be ['s'|'f'|'d'|'speed'|'flow'|'density']).".format(y_axis)
             error = TypeError if not isinstance(y_axis, str) else ValueError
             raise_error(error, desc)
         elif y_axis in ['s', 'f', 'd']: y_axis = axes[y_axis.upper()]
 
         fig, ax = plt.subplots(1, 1)
+        start, step_len = self.sim_data["start"], self.sim_data["step_len"]
         all_edge_data = self.sim_data["data"]["edges"]
 
-        found_data = False
-        all_x_vals, all_y_vals = [], []
-        all_x_sets, all_y_sets = [], []
-        max_x, max_y = -math.inf, -math.inf
-        for edge_id in edge_ids:
-            if edge_id not in all_edge_data.keys():
-                desc = "Tracked edge with ID '{0}' not found.".format(edge_id)
-                raise_error(KeyError, desc)
-            
-            
-            e_step_data = all_edge_data[edge_id]["step_vehicles"]
-            
-            all_x_sets.append([])
-            all_y_sets.append([])
-            x_points, y_points = all_x_sets[-1], all_y_sets[-1]
+        data_labels = {"speed": "speeds", "flow": "flows", "density": "densities"}
 
-            for step in e_step_data:
-                if len(step) == 0: continue
-                else:
-                    n_vehicles = len(step)
-                    density = n_vehicles / all_edge_data[edge_id]["length"]
-                    all_speeds = [v[2] for v in step]
-                    avg_speed = sum(all_speeds) / len(all_speeds)
-                    if self.units == "UK": avg_speed = convert_units(avg_speed, "mph", "kmph")
-                    flow = avg_speed * density
-                    found_data = True
+        # Calculate limits for plotting percentiles (across data for all edges)
+        if x_percentile < 100 or y_percentile < 100:
+            all_x_vals, all_y_vals = [], []
+            for edge_id in edge_ids:
+                all_x_vals += all_edge_data[edge_id][data_labels[x_axis]]
+                all_y_vals += all_edge_data[edge_id][data_labels[y_axis]]
 
-                    for idx, (axis, points_arr) in enumerate(zip([x_axis, y_axis], [x_points, y_points])):
-
-                        if axis.upper() == 'SPEED':
-                            if idx == 0: x_val = avg_speed
-                            else: y_val = avg_speed
-                        elif axis.upper() == 'FLOW':
-                            if idx == 0: x_val = flow
-                            else: y_val = flow
-                        elif axis.upper() == 'DENSITY':
-                            if idx == 0: x_val = density
-                            else: y_val = density
-                        else:
-                            desc = "Invalid {0}-axis value '{1}' (must be ['density'|'flow'|'speed'])".format("x" if idx == 0 else "y", axis)
-                            raise_error(ValueError, desc)
-
-                        if idx == 0:
-                            points_arr.append(x_val)
-                            all_x_vals.append(x_val)
-                        else:
-                            points_arr.append(y_val)
-                            all_y_vals.append(y_val)
-                    
-        if not found_data:
-            desc = "No data to plot (no vehicles found on tracked edges)."
-            raise_error(KeyError, desc)
-
-        if not separate_edges:
-            all_x_sets = [[x_val for x_set in all_x_sets for x_val in x_set]]
-            all_y_sets = [[y_val for y_set in all_y_sets for y_val in y_set]]
+            x_percentile, y_percentile = max(min(x_percentile, 100), 1), max(min(y_percentile, 100), 1)
+            outlier_x_lim = np.percentile(all_x_vals, x_percentile)
+            outlier_y_lim = np.percentile(all_y_vals, y_percentile)
 
         plotted = False
+        max_x, max_y = -math.inf, -math.inf
+        x_points, y_points = [], []
+        for idx, edge_id in enumerate(edge_ids):
 
-        outlier_x_lim = np.percentile(all_x_vals, x_percentile)
-        outlier_y_lim = np.percentile(all_y_vals, y_percentile)
+            x_vals = all_edge_data[edge_id][data_labels[x_axis]]
+            y_vals = all_edge_data[edge_id][data_labels[y_axis]]
+            
+            # Get time_steps if plotting within time range
+            if time_range != None:
+                time_steps = get_time_steps(x_vals, self.time_unit, step_len, start)
+                _, x_vals = limit_vals_by_range(time_steps, x_vals, time_range)
+                _, y_vals = limit_vals_by_range(time_steps, y_vals, time_range)
 
-        for set_idx, (x_vals, y_vals) in enumerate(zip(all_x_sets, all_y_sets)):
-            new_x_vals, new_y_vals = [], []
-            for x_val, y_val in zip(x_vals, y_vals):
-                if x_val <= outlier_x_lim and y_val <= outlier_y_lim:
-                    new_x_vals.append(x_val)
-                    new_y_vals.append(y_val)
-                    max_x, max_y = max(max_x, x_val), max(max_y, y_val)
-            if len(new_x_vals) > 0 and len(new_y_vals) > 0:
-                plotted = True
-                label = edge_ids[set_idx] if separate_edges else None
-                plt.scatter(new_x_vals, new_y_vals, color=self._get_colour("WHEEL", reset_wheel=not plotted), label=label, zorder=2)
+            # Change -1 vals (no vehicles) to 0 for calculating averages
+            x_vals = [max(val, 0) for val in x_vals]
+            y_vals = [max(val, 0) for val in y_vals]
 
-        if not plotted:
-            desc = "No data to plot (no data within percentiles)."
-            raise_error(ValueError, desc)        
+            if len(x_vals) == 0 or len(y_vals) == 0: continue
+
+            # Calculate moving average, using aggregation_steps as the average
+            if aggregation_steps > 0:
+                avg_x_vals, avg_y_vals = [], []
+                for idx in range(len(x_vals)):
+                    per_x_vals = x_vals[max(idx+1-aggregation_steps, 0):idx+1]
+                    per_y_vals = y_vals[max(idx+1-aggregation_steps, 0):idx+1]
+
+                    avg_x_vals.append(sum(per_x_vals) / len(per_x_vals))
+                    avg_y_vals.append(sum(per_y_vals) / len(per_y_vals))
+
+                x_vals, y_vals = avg_x_vals, avg_y_vals
+
+            # Filter for outlying points if plotting percentiles
+            if x_percentile < 100 or y_percentile < 100:
+
+                lim_x_vals, lim_y_vals = [], []
+                for x_val, y_val in zip(x_vals, y_vals):
+                    if x_val <= outlier_x_lim and y_val <= outlier_y_lim:
+                        lim_x_vals.append(x_val)
+                        lim_y_vals.append(y_val)
+                x_vals, y_vals = lim_x_vals, lim_y_vals
+
+            if len(x_vals) == 0 or len(y_vals) == 0: continue
+            max_x, max_y = max(max(x_vals), max_x), max(max(y_vals), max_y)
+
+            x_points += x_vals
+            y_points += y_vals
+
+            if separate_edges:
+                ax.scatter(x_points, y_points, color=self._get_colour("WHEEL", idx==0), label=edge_id if separate_edges else None, zorder=2)
+                x_points, y_points, plotted = [], [], True
+
+        if not separate_edges and len(x_vals) > 0 and len(y_vals) > 0:
+            ax.scatter(x_points, y_points, color=self._get_colour(plt_colour), zorder=2)
+
+        elif not plotted:
+            desc = "No data to plot (no vehicles found on tracked edges during time period)."
+            raise_error(KeyError, desc)
 
         dist = "mi" if self.units == "IMPERIAL" else "km"
         sp = "mph" if self.units == "IMPERIAL" else "kmph"

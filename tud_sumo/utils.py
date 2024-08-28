@@ -297,7 +297,7 @@ def get_axis_lim(data_vals, end_buff = 0.05):
         
     return max_val * pct_buff
 
-def limit_vals_by_range(time_steps, data_vals=None, time_range=None):
+def limit_vals_by_range(time_steps, data_vals=None, time_range=None) -> list|tuple:
     """
     For plotting, to limit data values between to those within a given time range.
     :param time_steps: List of time step values
