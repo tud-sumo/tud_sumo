@@ -1,6 +1,6 @@
 # TU Delft SUMO Wrapper
 
-![logos](header.png)
+![logos](https://github.com/tud-sumo/tud_sumo/raw/main/img/header.png?raw=true)
 
 <p align="center">
   <a href="https://pypi.org/project/tud-sumo/">
@@ -23,7 +23,7 @@
 
 Python SUMO wrapper, using traci, written for the DAIMoND Lab at TU Delft by Callum Evans. The full documentation & examples can be found at [tud-sumo.github.io/docs/](https://tud-sumo.github.io/docs/). Example code can be found at [github.com/tud-sumo/example](https://github.com/tud-sumo/example).<br><br>
 
-![logos](logos.png)
+![logos](https://github.com/tud-sumo/tud_sumo/raw/main/img/logos.png?raw=true)
 
 ## Requirements 
 

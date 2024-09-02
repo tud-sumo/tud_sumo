@@ -403,7 +403,7 @@ class Simulation:
                 desc = "Unknown destination edge ID '{0}'.".format(routing[1])
                 raise_error(KeyError, desc, self.curr_step)
 
-        step_range = validate_list_types(step_range, ((int, float), (int, float)), True, "step_range", self.curr_step)
+        step_range = validate_list_types(step_range, ((int), (int)), True, "step_range", self.curr_step)
         if step_range[1] < step_range[0] or step_range[1] < self.curr_step:
             desc = "Invalid step_range '{0}' (must be valid range and end > current step)."
             raise_error(ValueError, desc, self.curr_step)
@@ -441,6 +441,33 @@ class Simulation:
 
         self._demand_arrs.append([routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, insertion_sd])
 
+    def add_demand_function(self, routing: str|list|tuple, step_range: list|tuple, demand_function, parameters: dict|None = None, vehicle_types: str|list|tuple|None = None, vehicle_type_dists: list|tuple|None = None, initial_speed: str|int|float = "max", origin_lane: str|int|float = "best", insertion_sd: float = 1/3):
+        """
+        Adds traffic flow demand calculated for each step using a 'demand_function'.
+        'step' is the only required parameter of the function.
+        :param routing:            Either a route ID or OD pair of edge IDs
+        :param step_range:         (2x1) list or tuple denoting the start and end steps of the demand
+        :param demand_function:    Function used to calculate flow (vehicles/hour)
+        :param parameters:         Dictionary containing extra parameters for the demand function
+        :param vehicle_types:      List of vehicle type IDs
+        :param vehicle_type_dists: Vehicle type distributions used when generating flow
+        :param initial_speed:      Initial speed at insertion, either ['max'|'random'] or number > 0
+        :param origin_lane:        Lane for insertion at origin, either ['random'|'free'|'allowed'|'best'|'first'] or lane index
+        """
+        
+        step_range = validate_list_types(step_range, ((int), (int)), True, "step_range", self.curr_step)
+        if step_range[1] < step_range[0] or step_range[1] < self.curr_step:
+            desc = "Invalid step_range '{0}' (must be valid range and end > current step)."
+            raise_error(ValueError, desc, self.curr_step)
+        
+        for step_no in range(step_range[0], step_range[1]):
+            
+            params = {"step": step_no}
+            if parameters != None: params.update(parameters)
+            demand_val = max(0, demand_function(**params))
+            
+            self.add_demand(routing, (step_no, step_no), demand_val, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, insertion_sd)
+
     def _add_demand_vehicles(self) -> None:
         """
         Implements demand in the demand table.
@@ -463,7 +490,10 @@ class Simulation:
                 
                 added = 0
                 if veh_per_step < 1: n_vehicles = 1 if random() < veh_per_step else 0
-                else: n_vehicles = round(np.random.normal(veh_per_step, veh_per_step * insertion_sd, 1)[0])
+                else:
+                    if insertion_sd > 0: n_vehicles = round(np.random.normal(veh_per_step, veh_per_step * insertion_sd, 1)[0])
+                    else: n_vehicles = veh_per_step
+
                 n_vehicles = max(0, n_vehicles)
 
                 while added < n_vehicles:
@@ -943,7 +973,7 @@ class Simulation:
             raise_error(SimulationError, desc, self.curr_step)
         return self._all_data["data"]["vehicles"]["delay"][-1]
     
-    def add_vehicle_in_funcs(self, functions) -> None:
+    def add_vehicle_in_functions(self, functions) -> None:
         """
         Add a function (or list of functions) that will are called with each
         new vehicle that enters the simulation. Valid parameters are 'curr_step',
@@ -963,7 +993,7 @@ class Simulation:
             self._v_in_funcs.append(func)
             self._v_func_params[func.__name__] = func_params
 
-    def remove_vehicle_in_funcs(self, functions) -> None:
+    def remove_vehicle_in_functions(self, functions) -> None:
         """
         Stop a function called with each new vehicle that enters the simulation.
         :param functions: Function (or function name) or list of functions
@@ -986,7 +1016,7 @@ class Simulation:
 
         self._v_in_funcs = new_v_in_funcs
 
-    def add_vehicle_out_funcs(self, functions) -> None:
+    def add_vehicle_out_functions(self, functions) -> None:
         """
         Add a function (or list of functions) that will are called with each
         vehicle that exits the simulation. Valid parameters are 'curr_step'
@@ -1006,7 +1036,7 @@ class Simulation:
             self._v_out_funcs.append(func)
             self._v_func_params[func.__name__] = func_params
 
-    def remove_vehicle_out_funcs(self, functions) -> None:
+    def remove_vehicle_out_functions(self, functions) -> None:
         """
         Stop a function called with each vehicle that exits the simulation.
         :param functions: Function (or function name) or list of functions
@@ -1218,7 +1248,7 @@ class Simulation:
                                 if data_key == "lsm_occupancy":
                                     if tc.LAST_STEP_OCCUPANCY in subscribed_data: occupancy = subscribed_data[tc.LAST_STEP_OCCUPANCY]
                                     else: occupancy = d_class.getLastStepOccupancy(detector_id)
-                                    detector_data[data_key] = occupancy
+                                    detector_data[data_key] = occupancy / 100
                                 elif data_key == "last_detection":
                                     if tc.LAST_STEP_TIME_SINCE_DETECTION in subscribed_data: last_detection = subscribed_data[tc.LAST_STEP_TIME_SINCE_DETECTION]
                                     else: last_detection = d_class.getTimeSinceDetection(detector_id)
@@ -1236,47 +1266,142 @@ class Simulation:
                 else: all_data_vals[detector_id] = detector_data
         
         return all_data_vals
-
-    def get_interval_detector_data(self, detector_id: int|str, n_steps: int, data_keys: str|list, avg_vals: bool = False, interval_end: int = 0) -> float|dict:
+    
+    def get_interval_detector_data(self, detector_ids: int|str, data_keys: str|list, n_steps: int, interval_end: int = 0, avg_step_vals: bool = True, avg_det_vals: bool = True, sum_counts: bool = True) -> float|list|dict:
         """
-        Get data previously collected by a detector over range (curr step - n_step -> curr_step).
-        :param detector_id:  Detector ID
-        :param n_steps:      Interval length in steps (max at number of steps the simulation has run)
-        :param data_keys:    List of keys from [vehicle_counts|speeds|occupancies (induction loop only)], or single key
-        :param avg_bool:     Bool denoting whether to average values
-        :param interval_end: Steps since end of interval (0 = current step)
-        :return float|dict:  Either single value or dict containing values by data_key
+        Get data previously collected by a detector over range (curr step - n_step - interval_end -> curr_step - interval_end).
+        :param detector_ids:  Detector ID or list of IDs
+        :param data_keys:     List of keys from ['flow'|'density'|'speeds'|'no_vehicles'|'no_unique_vehicles'|'occupancies' (induction loop only)], or single key
+        :param n_steps:       Interval length in steps (max at number of steps the simulation has run)
+        :param interval_end:  Steps since end of interval (0 = current step)
+        :param avg_step_vals: Bool denoting whether to return an average value across the interval ('flow' or 'density' always returns average value for interval)
+        :param avg_det_vals:  Bool denoting whether to return values averaged for all detectors
+        :param sum_counts:    Bool denoting whether to return total count values ('no_vehicles' or 'no_unique_vehicles', overrides avg_step_vals)
+        :return float|dict:   Either single value or dict containing values by data_key
         """
 
         if self._all_data == None:
             desc = "No detector data as the simulation has not been run or data has been reset."
             raise_error(SimulationError, desc, self.curr_step)
-        elif detector_id not in self.available_detectors.keys() or detector_id not in self._all_data["data"]["detectors"].keys():
-            desc = "Detector with ID '{0}' not found.".format(detector_id)
-            raise_error(KeyError, desc, self.curr_step)
+        elif n_steps + interval_end > self._all_data["end"] - self._all_data["start"]:
+            desc = "Not enough data (n_steps '{0}' + interval_end '{1}' > '{2}').".format(n_steps, interval_end, self._all_data["end"] - self._all_data["start"])
+            raise_error(ValueError, desc, self.curr_step)
+        elif not isinstance(n_steps, int):
+            desc = "Invalid n_steps '{0}' (must be int, not '{1}').".format(n_steps, type(n_steps).__name__)
+            raise_error(TypeError, desc, self.curr_step)
+        elif n_steps < 1:
+            desc = "Invalid n_steps '{0}' (must be >=1).".format(n_steps)
+            raise_error(ValueError, desc, self.curr_step)
 
-        detector_data = {}
-        if not isinstance(data_keys, (list, tuple)): data_keys = [data_keys]
+        all_data_vals = {}
+        if isinstance(detector_ids, str): detector_ids = [detector_ids]
+        detector_ids = validate_list_types(detector_ids, str, param_name="detector_ids", curr_sim_step=self.curr_step)
+
+        if isinstance(data_keys, str): data_keys = [data_keys]
+        data_keys = validate_list_types(data_keys, str, param_name="data_keys", curr_sim_step=self.curr_step)
+
         for data_key in data_keys:
-            if data_key in ["vehicle_counts", "speeds", "occupancies"]:
-                if data_key in self._all_data["data"]["detectors"][detector_id].keys():
-                    data = self._all_data["data"]["detectors"][detector_id][data_key]
-                    if len(data) < n_steps + interval_end:
-                        desc = "Not enough data (n_steps '{0}' + interval_end '{1}' > '{2}').".format(n_steps, interval_end, len(data))
-                        raise_error(ValueError, desc, self.curr_step)
-                    if interval_end <= 0: data_arr = data[-n_steps:]
-                    else: data_arr = data[-(n_steps + interval_end):-interval_end]
-                    if avg_vals: data_arr = sum(data_arr) / len(data_arr)
-                else:
-                    desc = "Detector '{0}' of type '{1}' does not collect '{2}' data.".format(detector_id, self._all_data["data"]["detectors"][detector_id]["type"], data_key)
-                    raise_error(KeyError, desc, self.curr_step)
-            else:
-                desc = "Unrecognised data key ('{0}').".format(data_key)
-                raise_error(KeyError, desc, self.curr_step)
-            detector_data[data_key] = data_arr
+            # Store all data values in a matrix of size (n_steps x len(detector_ids))
+            all_data_vals[data_key] = []
 
-        if len(data_keys) == 1: return detector_data[data_keys[0]]
-        else: return detector_data
+            for detector_id in detector_ids:
+                if detector_id in self._all_data["data"]["detectors"].keys():
+
+                    if data_key in ["speeds", "occupancies", "no_vehicles"]:
+
+                        key = "vehicle_counts" if data_key == "no_vehicles" else data_key
+                        data = self._all_data["data"]["detectors"][detector_id][key]
+
+                        if interval_end <= 0: values = data[-n_steps:]
+                        else: values = data[-(n_steps + interval_end):-interval_end]                    
+                    
+                    elif data_key in ["flow", "density", "no_unique_vehicles"]:
+
+                        veh_ids = self._all_data["data"]["detectors"][detector_id]["vehicle_ids"]
+
+                        if interval_end <= 0: interval_ids = veh_ids[-n_steps:]
+                        else: interval_ids = veh_ids[-(n_steps + interval_end):-interval_end]
+
+                        step_counts, known_ids = [], set([])
+                        for step_data in interval_ids:
+                            step_ids = set(step_data)
+                            step_counts.append(len(step_ids - known_ids))
+                            known_ids = known_ids.union(step_ids)
+
+                        if data_key == "no_unique_vehicles": values = step_counts
+                        else:
+                            
+                            if sum(step_counts) > 0:
+                                # average flow (vehicles per hour) = no. unique vehicles / interval duration (in hours)
+                                values = sum(step_counts) / (convert_units(n_steps, "steps", "hours", self.step_length))
+
+                                # calculate density w/ flow & speed
+                                if data_key == "density":
+                                    speed_data = self._all_data["data"]["detectors"][detector_id]["speeds"]
+
+                                    if interval_end <= 0: speed_vals = speed_data[-n_steps:]
+                                    else: speed_vals = speed_data[-(n_steps + interval_end):-interval_end]
+
+                                    speed_vals = [val for val in speed_vals if val != -1]
+
+                                    if len(speed_vals) > 0:
+
+                                        if self.units.name == "UK": speed_vals = convert_units(speed_vals, "mph", "kmph")
+                                        avg_speed = sum(speed_vals) / len(speed_vals)
+                                        values /= avg_speed
+                                    
+                                    else: values = 0
+                            
+                            # if there are no vehicles detected, flow & density = 0
+                            else: values = 0
+
+                    else:
+                        desc = "Unsupported data key ('{0}').".format(data_key)
+                        raise_error(KeyError, desc, self.curr_step)
+
+                    all_data_vals[data_key].append(values)
+
+                else:
+                    desc = "Detector with ID '{0}' not found.".format(detector_id)
+                    raise_error(KeyError, desc, self.curr_step)
+
+            # if averaging / summing values, flatten the matrix on the
+            # x axis, from (n_steps x len(detector_ids)) to (1 x len(detector_ids))
+            if (avg_step_vals or sum_counts) and data_key not in ["flow", "density"]:
+                for idx, det_vals in enumerate(all_data_vals[data_key]):
+                    vals = [val for val in det_vals if val != -1]
+                    
+                    if sum_counts and data_key in ["no_vehicles", "no_unique_vehicles"]:
+                        all_data_vals[data_key][idx] = sum(vals) if len(vals) > 0 else 0
+
+                    elif avg_step_vals: all_data_vals[data_key][idx] = sum(vals) / len(vals) if len(vals) > 0 else -1
+
+            # if averaging detector values (return average for all detectors), flatten
+            # the matrix on the y axis, from ([n_steps|1] x len(detector_ids)) to ([n_steps|1] x 1)
+            if avg_det_vals and data_key not in ["flow", "density"]:
+                
+                if avg_step_vals:
+                    vals = [val for val in all_data_vals[data_key] if val != -1]
+                    all_data_vals[data_key] = sum(vals) / len(vals) if len(vals) > 0 else 0
+
+                else:
+                    vals = []
+                    for det_vals in zip(*all_data_vals[data_key]):
+                        _det_vals = [val for val in det_vals if val != -1]
+                        vals.append(sum(_det_vals) / len(_det_vals) if len(_det_vals) > 0 else 0)
+                    all_data_vals[data_key] = vals
+
+            elif avg_det_vals and data_key in ["flow", "density"]:
+                all_data_vals[data_key] = sum(all_data_vals[data_key]) / len(all_data_vals[data_key])
+
+            else:
+                # if not averaging detector values (and len(detector_ids) > 1), unpack the matrix into
+                # a dictionary containing all individual detector datasets by their ID
+                if len(detector_ids) == 1: all_data_vals[data_key] = all_data_vals[data_key][0]
+                else: all_data_vals[data_key] = {det_id: det_vals for det_id, det_vals in zip(detector_ids, all_data_vals[data_key])}
+
+        if len(all_data_vals) == 1: return all_data_vals[data_keys[0]]
+        else: return all_data_vals
 
     def set_phases(self, new_junc_phases: dict, start_phase: int = 0, overwrite: bool = True) -> None:
         """

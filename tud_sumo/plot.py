@@ -942,7 +942,7 @@ class Plotter:
         time_steps = get_time_steps(demand_vals, self.time_unit, step, start)
 
         for demand_arr in demand_arrs:
-            include = True
+
             arr_routing, vehs_per_step = demand_arr[0], demand_arr[2]
             arr_start, arr_end = int(demand_arr[1][0]), int(demand_arr[1][1])
 
@@ -957,10 +957,10 @@ class Plotter:
                     if routing[0] != arr_routing[0] or routing[1] != arr_routing[1]: continue
 
             if arr_start > end or arr_end < start: continue
-            if include:
-                for idx in range(max(start, arr_start), min(end, arr_end)):
-                    demand_vals[idx] += vehs_per_step
-                    added_val = True
+
+            for idx in range(max(start, arr_start), min(end, arr_end+1)):
+                demand_vals[idx] += vehs_per_step
+                added_val = True
 
         if not added_val:
             desc = "Unknown routing '{0}' (no demand found).".format(routing)
@@ -1702,7 +1702,7 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def plot_fundamental_diagram(self, edge_ids: list|tuple|str|None=None, x_axis: str="density", y_axis: str="flow", x_percentile: int=100, y_percentile: int=100, aggregation_steps: int=0, separate_edges: bool=False, time_range: list|tuple|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_fundamental_diagram(self, edge_ids: list|tuple|str|None=None, x_axis: str="density", y_axis: str="flow", x_percentile: int=100, y_percentile: int=100, aggregation_steps: int=0, separate_edges: bool=False, point_size: int=3, time_range: list|tuple|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot a fundamental diagram from tracked egde data.
         :param edge_ids:          Single tracked edge ID or list of IDs
@@ -1712,6 +1712,7 @@ class Plotter:
         :param y_percentile:      y-axis value plotting percentile [1-100]
         :param aggregation_steps: If given, values are aggregated using this interval
         :param separate_edges:    If True, individual edges are plotted with separate colours
+        :param point_size:        Scatter graph point size
         :param time_range:        Plotting time range (in plotter class units)
         :param plt_colour:        Line colour for plot (defaults to TUD 'blauw')
         :param fig_title:         If given, will overwrite default title
@@ -1813,11 +1814,11 @@ class Plotter:
             y_points += y_vals
 
             if separate_edges:
-                ax.scatter(x_points, y_points, color=self._get_colour("WHEEL", idx==0), label=edge_id if separate_edges else None, zorder=2)
+                ax.scatter(x_points, y_points, s=point_size, color=self._get_colour("WHEEL", idx==0), label=edge_id if separate_edges else None, zorder=2)
                 x_points, y_points, plotted = [], [], True
 
         if not separate_edges and len(x_vals) > 0 and len(y_vals) > 0:
-            ax.scatter(x_points, y_points, color=self._get_colour(plt_colour), zorder=2)
+            ax.scatter(x_points, y_points, s=point_size, color=self._get_colour(plt_colour), zorder=2)
 
         elif not plotted:
             desc = "No data to plot (no vehicles found on tracked edges during time period)."

@@ -143,7 +143,7 @@ def raise_warning(desc, curr_sim_step=None):
     else: caller = ""
     caller += "{0}()".format(inspect.currentframe().f_back.f_code.co_name)
     warning_msg = "(WARNING) {0}: {1}".format(caller, desc)
-    if curr_sim_step != None: warning_msg = "(step {0}) ".format(curr_sim_step) + warning_msg
+    if curr_sim_step != None: warning_msg = "\n(step {0}) ".format(curr_sim_step) + warning_msg
     print(warning_msg)
 
 def convert_units(values, orig_units, new_units, step_length=1, keep_arr=False):
