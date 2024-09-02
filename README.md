@@ -32,3 +32,7 @@ Python 3.10 or later is required. Dependencies are; `tqdm`, `matplotlib`, `mpl-t
 ## Contact Information
 
 TUD-SUMO is developed in the DAIMoND lab of TU Delft. For any questions or feedback, please contact Callum Evans at _c.evans@tudelft.nl_. Bug reports can be created in the GitHub repository: [github.com/tud-sumo/tud_sumo](https://github.com/tud-sumo/tud_sumo/).
+
+## Acknowledgements
+
+TUD-SUMO is part of the research under the project "_AI in Network Management_," funded by Rijkswaterstaat, grant agreement nr. 31179439, under the label of ITS Edulab.
