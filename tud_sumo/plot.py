@@ -169,7 +169,7 @@ class Plotter:
                 desc = "Junction '{0}' not found in tracked junctions.".format(junc_id)
                 raise_error(KeyError, desc)
 
-            if tl.track_flow: junc_flows = tl.get_curr_data()["flows"]
+            if tl.track_flow: junc_flows = tl.__dict__()["flows"]
             else:
                 desc = "No traffic light at junction '{0}'.".format(junc_id)
                 raise_error(ValueError, desc)
@@ -279,7 +279,7 @@ class Plotter:
 
             m_len = len(m_mask)
 
-        xlim = convert_units([self.sim_data["start"] * self.sim_data["step_len"], self.sim_data["end"] * self.sim_data["step_len"]], "steps", self.time_unit, self.sim_data["step_len"])
+        xlim = convert_units([self.sim_data["start"], self.sim_data["end"]], "steps", self.time_unit, self.sim_data["step_len"])
         if isinstance(time_range, (list, tuple)) and time_range != None:
             if len(time_range) != 2:
                 desc = "Invalid time range (must have length 2, not {0}).".format(len(time_range))
@@ -1904,7 +1904,7 @@ class Plotter:
         ax.plot(convert_units(x_vals, "steps", self.time_unit, self.sim_data["step_len"]), y_vals, color=self._get_colour(plt_colour), linewidth=1)
         
         if fig_title == None:
-            if od_pair == None: fig_title = "{0}Trip Throughput".format(self.sim_label)
+            if od_pair == None: fig_title = "{0}Network Throughput".format(self.sim_label)
             else: fig_title = "{0}'{1}' → '{2}' Trip Throughput".format(self.sim_label, od_pair[0], od_pair[1])
 
         ax.set_title(fig_title, pad=20)

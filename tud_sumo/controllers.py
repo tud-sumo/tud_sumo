@@ -15,6 +15,8 @@ class VSLController:
         self.activated = False
         self.activation_times = []
 
+        self._init_params = vsl_params
+
         valid_params = {"type": (str, int), "geometry_ids": (list, tuple), "default_limit": (int, float)}
         error, desc = test_input_dict(vsl_params, valid_params, "VSL controller", required=["type", "geometry_ids"])
         if error != None: raise_error(error, desc, self.sim.curr_step)
@@ -117,6 +119,8 @@ class RGController:
 
         self.activated = False
         self.activation_times = []
+
+        self._init_params = rg_params
 
         valid_params = {"type": (str, int), "old_destination": str, "new_destination": str, "diversion_pct": (int, float),
                         "vehicle_type": (str, list, tuple), "detector_ids": (list, tuple), "highlight": (str, list, tuple)}

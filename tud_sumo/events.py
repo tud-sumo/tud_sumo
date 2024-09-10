@@ -45,6 +45,20 @@ class EventScheduler:
 
         return event_ids
     
+    def get_events(self, event_statuses=None):
+        if event_statuses == None: event_statuses = ["scheduled", "active", "completed"]
+        elif isinstance(event_statuses, str): event_statuses = [event_statuses]
+
+        events = []
+        if "scheduled" in event_statuses:
+            events += list(self.scheduled_events.values())
+        if "active" in event_statuses:
+            events += list(self.active_events.values())
+        if "completed" in event_statuses:
+            events += list(self.completed_events.values())
+
+        return events
+    
     def add_events(self, events):
 
         if isinstance(events, Event): self.scheduled_events[events.id] = events
@@ -111,6 +125,8 @@ class Event:
     def __init__(self, event_id, event_params, sim):
         self.id = event_id
         self.sim = sim
+
+        self._init_params = event_params
 
         if not isinstance(event_params, dict) and not isinstance(event_params, str):
             desc = "Invalid event_params (must be [dict|filepath (str)], not '{0}').".format(type(event_params).__name__)

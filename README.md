@@ -12,7 +12,8 @@
   <a href="https://github.com/tud-sumo/tud_sumo/blob/main/LICENSE">
       <img alt="PyPI - License" src="https://img.shields.io/pypi/l/tud-sumo?style=for-the-badge&color=%2300A6D6">
   </a>
-  <br>
+</p>
+<p align="center">
   <a href="https://github.com/tud-sumo/tud_sumo">
     <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/tud-sumo/tud_sumo?style=for-the-badge&logo=github&color=%2300A6D6"/>
   </a>

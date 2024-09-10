@@ -1,4 +1,4 @@
-import json, os, math, inspect, numpy as np
+import json, os, math, inspect
 from enum import Enum
 from datetime import datetime
 import traci.constants as tc
@@ -348,7 +348,7 @@ def test_input_dict(input_dict, valid_params, dict_name="", required=None) -> st
         if key not in valid_params:
             desc = "Unrecognised {0}parameter '{1}'".format(dict_name, key)
             close_match = get_most_similar_string(key, valid_params.keys())
-            desc = "{0}, did you mean '{1}'?".format(desc, close_match) if close_match != None else desc + "."
+            desc = "{0}. did you mean '{1}'?".format(desc, close_match) if close_match != None else desc + "."
             return (KeyError, desc)
         if not isinstance(item, valid_params[key]):
             if isinstance(valid_params[key], (list, tuple)):
