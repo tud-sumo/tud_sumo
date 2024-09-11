@@ -95,16 +95,17 @@ class VSLController:
         for g_data in self.geometry.values():
             g_data["avg_speeds"] = []
     
-    def update(self) -> None:
+    def update(self, keep_data: bool = True) -> None:
         """
         Updates controller data at time step.
         """
 
         self.curr_time = self.sim.curr_step
-        for g_id, g_data in self.geometry.items():
-            if self.sim.get_geometry_vals(g_id, "vehicle_count") > 0:
-                g_data["avg_speeds"].append(self.sim.get_geometry_vals(g_id, "vehicle_speed"))
-            else: g_data["avg_speeds"].append(-1)
+        if keep_data:
+            for g_id, g_data in self.geometry.items():
+                if self.sim.get_geometry_vals(g_id, "vehicle_count") > 0:
+                    g_data["avg_speeds"].append(self.sim.get_geometry_vals(g_id, "vehicle_speed"))
+                else: g_data["avg_speeds"].append(-1)
 
 class RGController:
     def __init__(self, rg_id: str|int, rg_params: dict, simulation):
@@ -237,7 +238,7 @@ class RGController:
         self.init_time = self.sim.curr_step
         self.curr_time = self.sim.curr_step
     
-    def update(self) -> None:
+    def update(self, keep_data: bool = True) -> None:
         """
         Performs route guidance on vehicles passing over the detector.
         """
@@ -258,6 +259,6 @@ class RGController:
 
                         n_diverted += 1
                         self.diverted_vehs.add(veh_id)
-        
-        self.total_vehs.append(total_vehs)
-        self.n_diverted.append(n_diverted)
+        if keep_data:
+            self.total_vehs.append(total_vehs)
+            self.n_diverted.append(n_diverted)

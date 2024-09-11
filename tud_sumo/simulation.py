@@ -1,6 +1,7 @@
 import os, sys, io, traci, sumolib, json, csv, math, inspect
 import traci.constants as tc
 import pickle as pkl
+import numpy as np
 from tqdm import tqdm
 from copy import copy, deepcopy
 from random import choices, choice, random, seed as set_seed
@@ -672,21 +673,29 @@ class Simulation:
                 desc = "Junction with ID '{0}' already exists.".format(junc_id)
                 raise_error(ValueError, desc, self.curr_step)
 
-    def reset_data(self) -> None:
+    def reset_data(self, reset_juncs: bool = True, reset_edges: bool = True, reset_controllers: bool = True, reset_trips: bool = True) -> None:
         """
         Resets data collection.
+        :param reset_juncs:       Reset tracked junction data
+        :param reset_edges:       Reset tracked edge data
+        :param reset_controllers: Reset controller data
+        :param reset_trips:       Reset complete/incomplete trip data
         """
 
-        for junction in self.tracked_junctions.values():
-            junction.reset()
+        if reset_juncs:
+            for junction in self.tracked_junctions.values():
+                junction.reset()
 
-        for edge in self.tracked_edges.values():
-            edge.reset()
+        if reset_edges:
+            for edge in self.tracked_edges.values():
+                edge.reset()
 
-        for controller in self.controllers.values():
-            controller.reset()
+        if reset_controllers:
+            for controller in self.controllers.values():
+                controller.reset()
 
-        self._trips = {"incomplete": {}, "completed": {}}
+        if reset_trips:
+            self._trips = {"incomplete": {}, "completed": {}}
 
         self._sim_start_time = get_time_str()
         self._all_data = None
@@ -830,7 +839,7 @@ class Simulation:
         :param end_step:        End point for stepping through simulation (given instead of end_step)
         :param n_seconds:       Simulation duration in seconds
         :param vehicle_types:   Vehicle type(s) to collect data of (list of types or string, defaults to all)
-        :param keep_data:       Denotes whether to store data collected during this run (defaults to True)
+        :param keep_data:       Denotes whether to store and process data collected during this run (defaults to True)
         :param append_data:     Denotes whether to append simulation data to that of previous runs or overwrite previous data (defaults to True)
         :param pbar_max_steps:  Max value for progress bar (persistent across calls) (negative values remove the progress bar)
         :return dict:           All data collected through the time period, separated by detector
@@ -862,28 +871,29 @@ class Simulation:
 
         n_steps = end_step - self.curr_step
 
-        # Create a new blank sim_data dictionary here
-        if prev_data == None:
-            all_data = {"scenario_name": "", "scenario_desc": "", "data": {}, "start": start_time, "end": self.curr_step, "step_len": self.step_length, "units": self.units.name, "seed": self._seed, "sim_start": self._sim_start_time, "sim_end": get_time_str()}
+        if keep_data:
+            # Create a new blank sim_data dictionary here
+            if prev_data == None:
+                all_data = {"scenario_name": "", "scenario_desc": "", "data": {}, "start": start_time, "end": self.curr_step, "step_len": self.step_length, "units": self.units.name, "seed": self._seed, "sim_start": self._sim_start_time, "sim_end": get_time_str()}
+                
+                if self.scenario_name == None: del all_data["scenario_name"]
+                else: all_data["scenario_name"] = self.scenario_name
+
+                if self.scenario_desc == None: del all_data["scenario_desc"]
+                else: all_data["scenario_desc"] = self.scenario_desc
+
+                if len(self.available_detectors) > 0: all_data["data"]["detectors"] = {}
+                if self.track_juncs: all_data["data"]["junctions"] = {}
+                if len(self.tracked_edges) > 0: all_data["data"]["edges"] = {}
+                if len(self.controllers) > 0: all_data["data"]["controllers"] = {}
+                all_data["data"]["vehicles"] = {"no_vehicles": [], "no_waiting": [], "tts": [], "delay": []}
+                if self._manual_flow and self._demand_arrs != None:
+                    all_data["data"]["demand"] = {"headers": self._demand_headers, "table": self._demand_arrs}
+                all_data["data"]["trips"] = {"incomplete": {}, "completed": {}}
+                if self._get_individual_vehicle_data: all_data["data"]["all_vehicles"] = []
+                if self._scheduler != None: all_data["data"]["events"] = {}
             
-            if self.scenario_name == None: del all_data["scenario_name"]
-            else: all_data["scenario_name"] = self.scenario_name
-
-            if self.scenario_desc == None: del all_data["scenario_desc"]
-            else: all_data["scenario_desc"] = self.scenario_desc
-
-            if len(self.available_detectors) > 0: all_data["data"]["detectors"] = {}
-            if self.track_juncs: all_data["data"]["junctions"] = {}
-            if len(self.tracked_edges) > 0: all_data["data"]["edges"] = {}
-            if len(self.controllers) > 0: all_data["data"]["controllers"] = {}
-            all_data["data"]["vehicles"] = {"no_vehicles": [], "no_waiting": [], "tts": [], "delay": []}
-            if self._manual_flow and self._demand_arrs != None:
-                all_data["data"]["demand"] = {"headers": self._demand_headers, "table": self._demand_arrs}
-            all_data["data"]["trips"] = {"incomplete": {}, "completed": {}}
-            if self._get_individual_vehicle_data: all_data["data"]["all_vehicles"] = []
-            if self._scheduler != None: all_data["data"]["events"] = {}
-        
-        else: all_data = prev_data
+            else: all_data = prev_data
 
         create_pbar = False
         if not self._suppress_pbar:
@@ -914,30 +924,31 @@ class Simulation:
 
         while self.curr_step < end_step:
 
-            last_step_data, all_v_data = self._step(vehicle_types)
+            last_step_data, all_v_data = self._step(vehicle_types, keep_data)
 
-            if self._get_individual_vehicle_data: all_data["data"]["all_vehicles"].append(all_v_data)
+            if keep_data:
+                if self._get_individual_vehicle_data: all_data["data"]["all_vehicles"].append(all_v_data)
 
-            # Append all detector data to the sim_data dictionary
-            if "detectors" in all_data["data"]:
-                if len(all_data["data"]["detectors"]) == 0:
-                    for detector_id in detector_list:
-                        all_data["data"]["detectors"][detector_id] = self.available_detectors[detector_id]
-                        all_data["data"]["detectors"][detector_id].update({"speeds": [], "vehicle_counts": [], "vehicle_ids": []})
-                        if self.available_detectors[detector_id]["type"] == "inductionloop":
-                            all_data["data"]["detectors"][detector_id]["occupancies"] = []
+                # Append all detector data to the sim_data dictionary
+                if "detectors" in all_data["data"]:
+                    if len(all_data["data"]["detectors"]) == 0:
+                        for detector_id in detector_list:
+                            all_data["data"]["detectors"][detector_id] = self.available_detectors[detector_id]
+                            all_data["data"]["detectors"][detector_id].update({"speeds": [], "vehicle_counts": [], "vehicle_ids": []})
+                            if self.available_detectors[detector_id]["type"] == "inductionloop":
+                                all_data["data"]["detectors"][detector_id]["occupancies"] = []
 
-                for detector_id in last_step_data["detectors"].keys():
-                    if detector_id not in all_data["data"]["detectors"].keys():
-                        desc = "Unrecognised detector ID found ('{0}').".format(detector_id)
-                        raise_error(KeyError, desc, self.curr_step)
-                    for data_key, data_val in last_step_data["detectors"][detector_id].items():
-                        all_data["data"]["detectors"][detector_id][data_key].append(data_val)
-            
-            for data_key, data_val in last_step_data["vehicles"].items():
-                all_data["data"]["vehicles"][data_key].append(data_val)
+                    for detector_id in last_step_data["detectors"].keys():
+                        if detector_id not in all_data["data"]["detectors"].keys():
+                            desc = "Unrecognised detector ID found ('{0}').".format(detector_id)
+                            raise_error(KeyError, desc, self.curr_step)
+                        for data_key, data_val in last_step_data["detectors"][detector_id].items():
+                            all_data["data"]["detectors"][detector_id][data_key].append(data_val)
+                
+                for data_key, data_val in last_step_data["vehicles"].items():
+                    all_data["data"]["vehicles"][data_key].append(data_val)
 
-            all_data["data"]["trips"] = self._trips
+                all_data["data"]["trips"] = self._trips
 
             # Stop updating progress bar if reached total (even if simulation is continuing)
             if isinstance(self._pbar, tqdm):
@@ -946,23 +957,23 @@ class Simulation:
                 if self._pbar.n == self._pbar.total:
                     self._pbar, self._pbar_length = None, None
 
-        all_data["end"] = self.curr_step
-        all_data["sim_end"] = get_time_str()
-
-        # Get all object data and update in sim_data
-        if self.track_juncs: all_data["data"]["junctions"] = last_step_data["junctions"]
-        if self._scheduler != None: all_data["data"]["events"] = self._scheduler.__dict__()
-        for e_id, edge in self.tracked_edges.items(): all_data["data"]["edges"][e_id] = edge.__dict__()
-        for c_id, controller in self.controllers.items(): all_data["data"]["controllers"][c_id] = controller.__dict__()
-
         if keep_data:
+
+            all_data["end"] = self.curr_step
+            all_data["sim_end"] = get_time_str()
+
+            # Get all object data and update in sim_data
+            if self.track_juncs: all_data["data"]["junctions"] = last_step_data["junctions"]
+            if self._scheduler != None: all_data["data"]["events"] = self._scheduler.__dict__()
+            for e_id, edge in self.tracked_edges.items(): all_data["data"]["edges"][e_id] = edge.__dict__()
+            for c_id, controller in self.controllers.items(): all_data["data"]["controllers"][c_id] = controller.__dict__()
+
             self._all_data = all_data
             return all_data
-        else:
-            self.reset_data()
-            return None
+        
+        else: return None
             
-    def _step(self, vehicle_types: list|None = None) -> dict:
+    def _step(self, vehicle_types: list|None = None, keep_data: bool = True) -> dict:
         """
         Increment simulation by one time step, updating light state. step_through is recommended to run the simulation.
         :param vehicle_types: Vehicle type(s) to collect data of (list of types or string, defaults to all)
@@ -970,9 +981,6 @@ class Simulation:
         """
 
         self.curr_step += 1
-
-        data = {"detectors": {}, "vehicles": {}}
-        if self.track_juncs: data["junctions"] = {}
 
         # First, implement the demand in the demand table (if exists)
         if self._manual_flow:
@@ -1023,49 +1031,57 @@ class Simulation:
 
             self._update_lights(update_junc_lights)
 
-        # Update all edge data for the current step and implement any actions
+        # Update all edge & junction data for the current step and implement any actions
         # for controllers and event schedulers.
-        for controller in self.controllers.values(): controller.update()
-        for edge in self.tracked_edges.values(): edge.update()
+        for controller in self.controllers.values(): controller.update(keep_data)
+        for edge in self.tracked_edges.values(): edge.update(keep_data)
+        for junc in self.tracked_junctions.values(): junc.update(keep_data)
         if self._scheduler != None: self._scheduler.update_events()
 
-        # Collect all detector data for the step
-        detector_list = list(self.available_detectors.keys())
-        for detector_id in detector_list:
-            data["detectors"][detector_id] = {}
-            if detector_id not in self.available_detectors.keys():
-                desc = "Unrecognised detector ID found ('{0}').".format(detector_id)
-                raise_error(KeyError, desc, self.curr_step)
-            if self.available_detectors[detector_id]["type"] == "multientryexit":
+        if keep_data:
+            data = {"detectors": {}, "vehicles": {}}
+            if self.track_juncs: data["junctions"] = {}
+            
+            # Collect all detector data for the step
+            detector_list = list(self.available_detectors.keys())
+            for detector_id in detector_list:
+                data["detectors"][detector_id] = {}
+                if detector_id not in self.available_detectors.keys():
+                    desc = "Unrecognised detector ID found ('{0}').".format(detector_id)
+                    raise_error(KeyError, desc, self.curr_step)
+                if self.available_detectors[detector_id]["type"] == "multientryexit":
 
-                detector_data = self.get_detector_vals(detector_id, ["lsm_speed", "vehicle_count"])
-                data["detectors"][detector_id]["speeds"] = detector_data["lsm_speed"]
-                data["detectors"][detector_id]["vehicle_counts"] = detector_data["vehicle_count"]
-                
-            elif self.available_detectors[detector_id]["type"] == "inductionloop":
+                    detector_data = self.get_detector_vals(detector_id, ["lsm_speed", "vehicle_count"])
+                    data["detectors"][detector_id]["speeds"] = detector_data["lsm_speed"]
+                    data["detectors"][detector_id]["vehicle_counts"] = detector_data["vehicle_count"]
+                    
+                elif self.available_detectors[detector_id]["type"] == "inductionloop":
 
-                detector_data = self.get_detector_vals(detector_id, ["lsm_speed", "vehicle_count", "lsm_occupancy"])
-                data["detectors"][detector_id]["speeds"] = detector_data["lsm_speed"]
-                data["detectors"][detector_id]["vehicle_counts"] = detector_data["vehicle_count"]
-                data["detectors"][detector_id]["occupancies"] = detector_data["lsm_occupancy"]
+                    detector_data = self.get_detector_vals(detector_id, ["lsm_speed", "vehicle_count", "lsm_occupancy"])
+                    data["detectors"][detector_id]["speeds"] = detector_data["lsm_speed"]
+                    data["detectors"][detector_id]["vehicle_counts"] = detector_data["vehicle_count"]
+                    data["detectors"][detector_id]["occupancies"] = detector_data["lsm_occupancy"]
 
-            else:
-                if not self._suppress_warnings: raise_warning("Unknown detector type '{0}'.".format(self.available_detectors[detector_id]["type"]), self.curr_step)
+                else:
+                    if not self._suppress_warnings: raise_warning("Unknown detector type '{0}'.".format(self.available_detectors[detector_id]["type"]), self.curr_step)
 
-            data["detectors"][detector_id]["vehicle_ids"] = self.get_last_step_detector_vehicles(detector_id)
+                data["detectors"][detector_id]["vehicle_ids"] = self.get_last_step_detector_vehicles(detector_id)
 
-        no_vehicles, no_waiting, all_v_data = self.get_all_vehicle_data(vehicle_types=vehicle_types, all_dynamic_data=False)
-        data["vehicles"]["no_vehicles"] = no_vehicles
-        data["vehicles"]["no_waiting"] = no_waiting
-        data["vehicles"]["tts"] = no_vehicles * self.step_length
-        data["vehicles"]["delay"] = no_waiting * self.step_length
+            no_vehicles, no_waiting, all_v_data = self.get_all_vehicle_data(vehicle_types=vehicle_types, all_dynamic_data=False)
+            data["vehicles"]["no_vehicles"] = no_vehicles
+            data["vehicles"]["no_waiting"] = no_waiting
+            data["vehicles"]["tts"] = no_vehicles * self.step_length
+            data["vehicles"]["delay"] = no_waiting * self.step_length
 
-        if self.track_juncs:
-            for junc_id, junc in self.tracked_junctions.items():
-                junc.update()
-                data["junctions"][junc_id] = junc.__dict__()
+            if self.track_juncs:
+                for junc_id, junc in self.tracked_junctions.items():
+                    data["junctions"][junc_id] = junc.__dict__()
 
-        return data, all_v_data
+            return data, all_v_data
+        
+        else:
+            self.reset_data(reset_trips=False)
+            return None, None
     
     def get_no_vehicles(self) -> int:
         """
@@ -3549,80 +3565,81 @@ class TrackedJunction:
             if self.measure_spillback:
                 self.spillback_vehs = []
 
-    def update(self) -> None:
+    def update(self, keep_data: bool = True) -> None:
         """
         Update junction flow and TL data for the current time step.
         """
 
         self.curr_time = self.sim.curr_step
         
-        if self.has_tl:
-            curr_state = traci.trafficlight.getRedYellowGreenState(self.id)
-            colours = [*curr_state]
-            for idx, mc in enumerate(colours):
+        if keep_data:
+            if self.has_tl:
+                curr_state = traci.trafficlight.getRedYellowGreenState(self.id)
+                colours = [*curr_state]
+                for idx, mc in enumerate(colours):
+                    
+                    if len(self.durations[idx]) == 0 or mc.upper() != self.durations[idx][-1][0]:
+                        self.durations[idx].append([mc.upper(), 1])
+                    elif mc.upper() == self.durations[idx][-1][0]:
+                        self.durations[idx][-1][1] = self.durations[idx][-1][1] + 1
+
+                    if mc.upper() == 'G':
+                        m_green_durs = [val[1] for val in self.durations[idx] if val[0] == 'G']
+                        self.avg_m_green[idx] = sum(m_green_durs) / len(m_green_durs)
+                    elif mc.upper() == 'R':
+                        m_red_durs = [val[1] for val in self.durations[idx] if val[0] == 'R']
+                        self.avg_m_red[idx] = sum(m_red_durs) / len(m_red_durs)
+
+                self.avg_green = sum(self.avg_m_green) / len(self.avg_m_green)
+                self.avg_red = sum(self.avg_m_red) / len(self.avg_m_red)
+
+                self.states.append(colours)
+                self.curr_state = colours
+
+            if self.track_flow:
                 
-                if len(self.durations[idx]) == 0 or mc.upper() != self.durations[idx][-1][0]:
-                    self.durations[idx].append([mc.upper(), 1])
-                elif mc.upper() == self.durations[idx][-1][0]:
-                    self.durations[idx][-1][1] = self.durations[idx][-1][1] + 1
+                for vehicle_type in self.flow_vtypes:
+                    new_v_in = self.sim.get_last_step_detector_vehicles(self.inflow_detectors, vehicle_types=[vehicle_type] if vehicle_type != "all" else None, flatten=True)
+                    new_v_in = list(set(new_v_in) - set(self.v_in[vehicle_type]))
+                    self.v_in[vehicle_type] += new_v_in
+                    self.inflows[vehicle_type].append(len(new_v_in))
 
-                if mc.upper() == 'G':
-                    m_green_durs = [val[1] for val in self.durations[idx] if val[0] == 'G']
-                    self.avg_m_green[idx] = sum(m_green_durs) / len(m_green_durs)
-                elif mc.upper() == 'R':
-                    m_red_durs = [val[1] for val in self.durations[idx] if val[0] == 'R']
-                    self.avg_m_red[idx] = sum(m_red_durs) / len(m_red_durs)
+                for vehicle_type in self.flow_vtypes:
+                    new_v_out = self.sim.get_last_step_detector_vehicles(self.outflow_detectors, vehicle_types=[vehicle_type] if vehicle_type != "all" else None, flatten=True)
+                    new_v_out = list(set(new_v_out) - set(self.v_out[vehicle_type]))
+                    self.v_out[vehicle_type] += new_v_out
+                    self.outflows[vehicle_type].append(len(new_v_out))
 
-            self.avg_green = sum(self.avg_m_green) / len(self.avg_m_green)
-            self.avg_red = sum(self.avg_m_red) / len(self.avg_m_red)
+            if self.measure_queues:
 
-            self.states.append(colours)
-            self.curr_state = colours
+                if self.ramp_edges != None:
+                    queuing_vehicles = self.sim.get_last_step_geometry_vehicles(self.ramp_edges, flatten=True)
+                    self.queue_lengths.append(len(queuing_vehicles))
 
-        if self.track_flow:
-            
-            for vehicle_type in self.flow_vtypes:
-                new_v_in = self.sim.get_last_step_detector_vehicles(self.inflow_detectors, vehicle_types=[vehicle_type] if vehicle_type != "all" else None, flatten=True)
-                new_v_in = list(set(new_v_in) - set(self.v_in[vehicle_type]))
-                self.v_in[vehicle_type] += new_v_in
-                self.inflows[vehicle_type].append(len(new_v_in))
+                    num_stopped = len([veh_id for veh_id in queuing_vehicles if self.sim.get_vehicle_vals(veh_id, "is_stopped")])
+                    self.queue_delays.append(num_stopped * self.sim.step_length)
+                
+                elif self.queue_detector != None:
+                    queuing_vehicles = self.sim.get_last_step_detector_vehicles(self.queue_detector, flatten=True)
+                    self.queue_lengths.append(len(queuing_vehicles))
 
-            for vehicle_type in self.flow_vtypes:
-                new_v_out = self.sim.get_last_step_detector_vehicles(self.outflow_detectors, vehicle_types=[vehicle_type] if vehicle_type != "all" else None, flatten=True)
-                new_v_out = list(set(new_v_out) - set(self.v_out[vehicle_type]))
-                self.v_out[vehicle_type] += new_v_out
-                self.outflows[vehicle_type].append(len(new_v_out))
+                    num_stopped = len([veh_id for veh_id in queuing_vehicles if self.sim.get_vehicle_vals(veh_id, "is_stopped")])
+                    self.queue_delays.append(num_stopped * self.sim.step_length)
 
-        if self.measure_queues:
+                else:
+                    desc = "Cannot update queue length (no detector or entry/exit edges)"
+                    raise_error(KeyError, desc, self.sim.curr_step)
 
-            if self.ramp_edges != None:
-                queuing_vehicles = self.sim.get_last_step_geometry_vehicles(self.ramp_edges, flatten=True)
-                self.queue_lengths.append(len(queuing_vehicles))
+            if self.measure_spillback:
+                spillback_vehs, all_waiting_vehs = 0, 0
+                all_loaded_vehicles = self.sim._all_loaded_vehicle_ids
+                for veh_id in all_loaded_vehicles:
+                    if not self.sim.vehicle_departed(veh_id):
+                        if traci.vehicle.getRoute(veh_id)[0] == self.ramp_edges[0]:
+                            spillback_vehs += 1
+                        all_waiting_vehs += 1
 
-                num_stopped = len([veh_id for veh_id in queuing_vehicles if self.sim.get_vehicle_vals(veh_id, "is_stopped")])
-                self.queue_delays.append(num_stopped * self.sim.step_length)
-            
-            elif self.queue_detector != None:
-                queuing_vehicles = self.sim.get_last_step_detector_vehicles(self.queue_detector, flatten=True)
-                self.queue_lengths.append(len(queuing_vehicles))
-
-                num_stopped = len([veh_id for veh_id in queuing_vehicles if self.sim.get_vehicle_vals(veh_id, "is_stopped")])
-                self.queue_delays.append(num_stopped * self.sim.step_length)
-
-            else:
-                desc = "Cannot update queue length (no detector or entry/exit edges)"
-                raise_error(KeyError, desc, self.sim.curr_step)
-
-        if self.measure_spillback:
-            spillback_vehs, all_waiting_vehs = 0, 0
-            all_loaded_vehicles = self.sim._all_loaded_vehicle_ids
-            for veh_id in all_loaded_vehicles:
-                if not self.sim.vehicle_departed(veh_id):
-                    if traci.vehicle.getRoute(veh_id)[0] == self.ramp_edges[0]:
-                        spillback_vehs += 1
-                    all_waiting_vehs += 1
-
-            self.spillback_vehs.append(spillback_vehs)
+                self.spillback_vehs.append(spillback_vehs)
 
 class TrackedEdge:
     def __init__(self, edge_id: str, simulation: Simulation) -> None:
@@ -3689,33 +3706,34 @@ class TrackedEdge:
         self.densities = []
         self.occupancies = []
 
-    def update(self) -> None:
+    def update(self, keep_data: bool = True) -> None:
         
         self.curr_time = self.sim.curr_step
-        last_step_vehs = self.sim.get_last_step_geometry_vehicles(self.id, flatten=True)
+        if keep_data:
+            last_step_vehs = self.sim.get_last_step_geometry_vehicles(self.id, flatten=True)
 
-        veh_data, total_speed = [], 0
-        for veh_id in last_step_vehs:
-            vals = self.sim.get_vehicle_vals(veh_id, ["speed", "position", "lane_idx"])
-            pos = self._get_distance_on_road(vals["position"])
-            if self.sim.units in ['IMPERIAL']: pos *= 0.0006213712
-            veh_data.append((veh_id, pos, vals["speed"], vals["lane_idx"]))
-            total_speed += vals["speed"]
-        
-        self.step_vehicles.append(veh_data)
+            veh_data, total_speed = [], 0
+            for veh_id in last_step_vehs:
+                vals = self.sim.get_vehicle_vals(veh_id, ["speed", "position", "lane_idx"])
+                pos = self._get_distance_on_road(vals["position"])
+                if self.sim.units in ['IMPERIAL']: pos *= 0.0006213712
+                veh_data.append((veh_id, pos, vals["speed"], vals["lane_idx"]))
+                total_speed += vals["speed"]
+            
+            self.step_vehicles.append(veh_data)
 
-        n_vehicles = len(veh_data)
+            n_vehicles = len(veh_data)
 
-        occupancy = self.sim.get_geometry_vals(self.id, "vehicle_occupancy")
-        speed = -1 if n_vehicles == 0 else total_speed / n_vehicles
-        if speed != -1 and self.sim.units == "UK": speed = convert_units(speed, "mph", "kmph")
-        density = -1 if n_vehicles == 0 else n_vehicles / self.length
-        flow = -1 if n_vehicles == 0 else speed * density
+            occupancy = self.sim.get_geometry_vals(self.id, "vehicle_occupancy")
+            speed = -1 if n_vehicles == 0 else total_speed / n_vehicles
+            if speed != -1 and self.sim.units == "UK": speed = convert_units(speed, "mph", "kmph")
+            density = -1 if n_vehicles == 0 else n_vehicles / self.length
+            flow = -1 if n_vehicles == 0 else speed * density
 
-        self.flows.append(flow)
-        self.speeds.append(speed)
-        self.densities.append(density)
-        self.occupancies.append(occupancy)
+            self.flows.append(flow)
+            self.speeds.append(speed)
+            self.densities.append(density)
+            self.occupancies.append(occupancy)
             
     def _get_distance_on_road(self, veh_coors):
         line = LineString(self.linestring)
