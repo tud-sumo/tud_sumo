@@ -1831,6 +1831,8 @@ class Plotter:
 
         completion_times = []
         for trip in com_trip_data.values():
+            
+            if "arrival" not in trip: continue
             origin, destination, arrival, veh_type = trip["origin"], trip["destination"], trip["arrival"], trip["vehicle_type"]
 
             if vehicle_types != None and veh_type not in vehicle_types: continue
