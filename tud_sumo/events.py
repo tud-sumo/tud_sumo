@@ -1,4 +1,5 @@
 import json, math, os, pickle as pkl
+from copy import deepcopy
 from random import random
 from .utils import *
 
@@ -14,17 +15,13 @@ class EventScheduler:
     def __dict__(self):
         schedule_dict = {}
 
-        if len(self.scheduled_events) > 0:
-            schedule_dict["scheduled"] = []
-            for event in self.scheduled_events.values(): schedule_dict["scheduled"].append(event.__dict__())
-
-        if len(self.active_events) > 0:
-            schedule_dict["active"] = []
-            for event in self.active_events.values(): schedule_dict["active"].append(event.__dict__())
-
-        if len(self.completed_events) > 0:
-            schedule_dict["completed"] = []
-            for event in self.completed_events.values(): schedule_dict["completed"].append(event.__dict__())
+        for status, event_dict in zip(["scheduled", "active", "completed"], [self.scheduled_events, self.active_events, self.completed_events]):
+            if len(event_dict) > 0:
+                schedule_dict[status] = {}
+                for event_obj in event_dict.values():
+                    event_dict = event_obj.__dict__()
+                    del event_dict["id"]
+                    schedule_dict[status][event_obj.id] = event_dict
 
         return schedule_dict
     

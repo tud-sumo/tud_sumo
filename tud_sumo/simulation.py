@@ -191,11 +191,10 @@ class Simulation:
 
         units = validate_type(units, (str, int), "units", self.curr_step)
         if isinstance(units, str):
-            if units.upper() in ["METRIC", "IMPERIAL", "UK"]:
-                self.units = Units(["METRIC", "IMPERIAL", "UK"].index(units.upper())+1)
-            else:
-                desc = "Invalid simulation units '{0}' (must be ['METRIC'|'IMPERIAL'|'UK']).".format(units)
-                raise_error(ValueError, desc)
+            valid_units = ["METRIC", "IMPERIAL", "UK"]
+            error, desc = test_valid_string(units, valid_units, "simulation units", case_sensitive=False)
+            if error != None: raise_error(error, desc)
+            self.units = Units(valid_units.index(units.upper())+1)
 
         elif units in [1, 2, 3]: self.units = Units(units)
         
@@ -1394,6 +1393,9 @@ class Simulation:
             if not isinstance(data_keys, (list, tuple)): data_keys = [data_keys]
             for data_key in data_keys:
 
+                error, desc = test_valid_string(data_key, valid_detector_val_keys, "data key")
+                if error != None: raise_error(error, desc)
+
                 match data_key:
                     case "type":
                         detector_data[data_key] = detector_type
@@ -1424,15 +1426,11 @@ class Simulation:
                         else: detector_data[data_key] = -1
 
                     case _:
-                        valid_keys = {"multientryexit": ["halting_no"], "inductionloop": ["last_detection", "lsm_occupancy"]}
+                        valid_keys = {"multientryexit": ["halting_no"], "inductionloop": ["last_detection", "lsm_occupancy", "avg_vehicle_length"]}
                         
-                        if data_key not in [item for row in list(valid_keys.values()) for item in row]:
-                            desc = "Unrecognised data key ('{0}').".format(data_key)
+                        if data_key not in valid_keys[detector_type]:
+                            desc = "Invalid data key '{0}' for detector type '{1}'.".format(data_key, detector_type)
                             raise_error(KeyError, desc, self.curr_step)
-                        else:
-                            if data_key not in valid_keys[detector_type]:
-                                desc = "Invalid data key '{0}' for detector type '{1}'.".format(data_key, detector_type)
-                                raise_error(KeyError, desc, self.curr_step)
 
                         match detector_type:
                             case "multientryexit":
@@ -1497,6 +1495,11 @@ class Simulation:
         data_keys = validate_list_types(data_keys, str, param_name="data_keys", curr_sim_step=self.curr_step)
 
         for data_key in data_keys:
+
+            valid_keys = ["speeds", "occupancies", "no_vehicles", "flow", "density", "no_unique_vehicles"]
+            error, desc = test_valid_string(data_key, valid_keys, "data key")
+            if error != None: raise_error(error, desc)
+
             # Store all data values in a matrix of size (n_steps x len(detector_ids))
             all_data_vals[data_key] = []
 
@@ -1554,10 +1557,6 @@ class Simulation:
                             
                             # if there are no vehicles detected, flow & density = 0
                             else: values = 0
-
-                    else:
-                        desc = "Unsupported data key ('{0}').".format(data_key)
-                        raise_error(KeyError, desc, self.curr_step)
 
                     all_data_vals[data_key].append(values)
 
@@ -2075,18 +2074,17 @@ class Simulation:
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
         vehicle_ids = validate_list_types(vehicle_ids, str, param_name="vehicle_ids", curr_sim_step=self.curr_step)
         
+        for data_key in data_keys:
+            error, desc = test_valid_string(data_key, list(traci_constants["vehicle"].keys()), "data key")
+            if error != None: raise_error(error, desc, self.curr_step)
+
         for vehicle_id in vehicle_ids:
             if self.vehicle_exists(vehicle_id):
-                if set(data_keys).issubset(set(traci_constants["vehicle"].keys())):
+                
+                # Subscriptions are added using the traci_constants dictionary in tud_sumo.utils
+                subscription_vars = [traci_constants["vehicle"][data_key] for data_key in data_keys]
+                traci.vehicle.subscribe(vehicle_id, subscription_vars)
 
-                    # Subscriptions are added using the traci_constants dictionary in tud_sumo.utils
-                    subscription_vars = [traci_constants["vehicle"][data_key] for data_key in data_keys]
-                    traci.vehicle.subscribe(vehicle_id, subscription_vars)
-
-                else:
-                    unknown_keys = list(set(data_keys) - set(traci_constants["vehicle"].keys()))
-                    desc = "Unknown or unsupported data keys [{0}].".format(",".join(unknown_keys))
-                    raise_error(KeyError, desc, self.curr_step)
             else:
                 desc = "Unrecognised vehicle ID given ('{0}').".format(vehicle_id)
                 raise_error(KeyError, desc, self.curr_step)
@@ -2120,6 +2118,10 @@ class Simulation:
         if isinstance(detector_ids, str): detector_ids = [detector_ids]
         detector_ids = validate_list_types(detector_ids, str, param_name="detector_ids", curr_sim_step=self.curr_step)
 
+        for data_key in data_keys:
+            error, desc = test_valid_string(data_key, list(traci_constants["detector"].keys()), "data key")
+            if error != None: raise_error(error, desc, self.curr_step)
+        
         for detector_id in detector_ids:
             if detector_id not in self.available_detectors.keys():
                 desc = "Detector with ID '{0}' not found.".format(detector_id)
@@ -2134,14 +2136,9 @@ class Simulation:
                         desc = "Only 'multientryexit' and 'inductionloop' detectors are currently supported (not '{0}').".format(detector_type)
                         raise_error(ValueError, desc, self.curr_step)
 
-            if set(data_keys).issubset(set(traci_constants["detector"].keys())):
-                # Subscriptions are added using the traci_constants dictionary in tud_sumo.utils
-                subscription_vars = [traci_constants["detector"][data_key] for data_key in data_keys]
-                d_class.subscribe(detector_id, subscription_vars)
-            else:
-                unknown_keys = list(set(data_keys) - set(traci_constants["detector"].keys()))
-                desc = "Unknown or unsupported data keys ['{0}'].".format("', '".join(unknown_keys))
-                raise_error(KeyError, desc, self.curr_step)
+            # Subscriptions are added using the traci_constants dictionary in tud_sumo.utils
+            subscription_vars = [traci_constants["detector"][data_key] for data_key in data_keys]
+            d_class.subscribe(detector_id, subscription_vars)
 
     def remove_detector_subscriptions(self, detector_ids: str|list|tuple) -> None:
         """
@@ -2181,6 +2178,10 @@ class Simulation:
         if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
         geometry_ids = validate_list_types(geometry_ids, str, param_name="geometry_ids", curr_sim_step=self.curr_step)
 
+        for data_key in data_keys:
+            error, desc = test_valid_string(data_key, list(traci_constants["geometry"].keys()), "data key")
+            if error != None: raise_error(error, desc, self.curr_step)
+        
         for geometry_id in geometry_ids:
             g_name = self.geometry_exists(geometry_id)
             if g_name == "edge": g_class = traci.edge
@@ -2189,14 +2190,9 @@ class Simulation:
                 desc = "Geometry ID '{0}' not found.".format(geometry_id)
                 raise_error(KeyError, desc, self.curr_step)
 
-            if set(data_keys).issubset(set(traci_constants["geometry"].keys())):
-                # Subscriptions are added using the traci_constants dictionary in tud_sumo.utils
-                subscription_vars = [traci_constants["geometry"][data_key] for data_key in data_keys]
-                g_class.subscribe(geometry_id, subscription_vars)
-            else:
-                unknown_keys = list(set(data_keys) - set(traci_constants["geometry"].keys()))
-                desc = "Unknown or unsupported data keys ['{0}'].".format("', '".join(unknown_keys))
-                raise_error(KeyError, desc, self.curr_step)
+            # Subscriptions are added using the traci_constants dictionary in tud_sumo.utils
+            subscription_vars = [traci_constants["geometry"][data_key] for data_key in data_keys]
+            g_class.subscribe(geometry_id, subscription_vars)
 
     def remove_geometry_subscriptions(self, geometry_ids: str|list|tuple) -> None:
         """
@@ -2243,6 +2239,10 @@ class Simulation:
                 raise_error(KeyError, desc, self.curr_step)
             
             for command, value in kwargs.items():
+
+                error, desc = test_valid_string(command, valid_set_vehicle_val_keys, "command")
+                if error != None: raise_error(error, desc, self.curr_step)
+
                 match command:
                     case "colour":
                         if value != None:
@@ -2368,10 +2368,6 @@ class Simulation:
                         else:
                             desc = "({0}): Invalid speed_safety_checks value '{1}' (must be (str), not '{2}').".format(command, value, type(value).__name__)
                             raise_error(TypeError, desc, self.curr_step)
-
-                    case _:
-                        desc = "Unrecognised command ('{0}').".format(command)
-                        raise_error(AttributeError, desc, self.curr_step)
 
     def get_vehicle_ids(self, vehicle_types: str|list|tuple|None = None) -> list:
         """
@@ -2661,6 +2657,10 @@ class Simulation:
 
             subscribed_data = traci.vehicle.getSubscriptionResults(vehicle_id)
             for data_key in data_keys:
+
+                error, desc = test_valid_string(data_key, valid_get_vehicle_val_keys, "data key")
+                if error != None: raise_error(error, desc, self.curr_step)
+            
                 match data_key:
                     case "type":
                         new_request = not (vehicle_known and data_key in self._known_vehicles[vehicle_id].keys())
@@ -2755,14 +2755,7 @@ class Simulation:
                         route = list(traci.vehicle.getRoute(vehicle_id))
                         data_vals[data_key] = route
 
-                    case _:
-                        desc = "Unrecognised key ('{0}').".format(data_key)
-                        raise_error(KeyError, desc, self.curr_step)
-
             if len(vehicle_ids) == 1:
-                if set(data_vals.keys()) != set(data_vals):
-                    desc = "Invalid data_keys given (must be from accepted list)."
-                    raise_error(ValueError, desc, self.curr_step)
                 if return_val: return list(data_vals.values())[0]
                 else: return data_vals
             else:
@@ -2900,6 +2893,10 @@ class Simulation:
             
             data_vals, subscribed_data = {}, g_class.getSubscriptionResults(geometry_id)
             for data_key in data_keys:
+
+                error, desc = test_valid_string(data_key, valid_get_geometry_val_keys, "data key")
+                if error != None: raise_error(error, desc, self.curr_step)
+
                 match data_key:
                     case "vehicle_count":
                         if tc.LAST_STEP_VEHICLE_ID_LIST in subscribed_data: vehicle_count = len(list(subscribed_data[tc.LAST_STEP_VEHICLE_ID_LIST]))
@@ -3001,7 +2998,7 @@ class Simulation:
                             units = "kmph" if self.units.name == "METRIC" else "mph"
                             data_vals[data_key] = convert_units(avg_lane_speed, "m/s", units)
                         case _:
-                            desc = "Unrecognised key ('{0}').".format(data_key)
+                            desc = "Invalid data key '{0}' (only valid for lanes, not edges).".format(data_key)
                             raise_error(ValueError, desc, self.curr_step)
                 elif g_name == "lane":
                     match data_key:
@@ -3021,13 +3018,10 @@ class Simulation:
                             units = "kmph" if self.units.name == "METRIC" else "mph"
                             data_vals[data_key] = convert_units(g_class.getMaxSpeed(geometry_id), "m/s", units)
                         case _:
-                            desc = "Unrecognised key ('{0}').".format(data_key)
+                            desc = "Invalid data key '{0}' (only valid for edges, not lanes).".format(data_key)
                             raise_error(ValueError, desc, self.curr_step)
 
             if len(geometry_ids) == 1:
-                if set(data_vals.keys()) != set(data_vals):
-                    desc = "Invalid data_keys given (must be from accepted list)."
-                    raise_error(ValueError, desc, self.curr_step)
                 if return_val: return list(data_vals.values())[0]
                 else: return data_vals
             else:
@@ -3058,6 +3052,10 @@ class Simulation:
                 raise_error(KeyError, desc, self.curr_step)
             
             for command, value in kwargs.items():
+
+                error, desc = test_valid_string(command, valid_set_geometry_val_keys, "command")
+                if error != None: raise_error(error, desc, self.curr_step)
+
                 match command:
                     case "max_speed":
                         if isinstance(value, (int, float)): 
@@ -3122,10 +3120,6 @@ class Simulation:
                         else:
                             desc = "({0}): Invalid right_lc value '{1}' (must be [str], not '{2}').".format(command, value, type(value).__name__)
                             raise_error(TypeError, desc, self.curr_step)
-
-                    case _:
-                        desc = "Unrecognised command ('{0}').".format(command)
-                        raise_error(AttributeError, desc, self.curr_step)
             
     def get_last_step_geometry_vehicles(self, geometry_ids: str|list, vehicle_types: list|None = None, flatten: bool = False) -> dict|list:
         """
@@ -3578,6 +3572,7 @@ class TrackedJunction:
                 colours = [*curr_state]
                 for idx, mc in enumerate(colours):
                     
+                    # Phase duration in steps (not seconds)
                     if len(self.durations[idx]) == 0 or mc.upper() != self.durations[idx][-1][0]:
                         self.durations[idx].append([mc.upper(), 1])
                     elif mc.upper() == self.durations[idx][-1][0]:
@@ -3915,7 +3910,7 @@ def print_summary(sim_data, save_file=None, tab_width=58):
             print(secondary_delineator)
 
             for event_status in event_statuses:
-                event_ids = [event["id"] for event in sim_data["data"]["events"][event_status]]
+                event_ids = list(sim_data["data"]["events"][event_status].keys())
                 event_str = "{0}: {1}".format(event_status.title(), ", ".join(event_ids))
                 event_lines = _add_linebreaks(event_str, tab_width)
                 for line in event_lines: _table_print(line, tab_width)

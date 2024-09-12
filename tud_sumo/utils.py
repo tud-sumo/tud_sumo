@@ -3,6 +3,7 @@ from enum import Enum
 from datetime import datetime
 import traci.constants as tc
 import pickle as pkl
+from difflib import SequenceMatcher
 
 date_format = "%d/%m/%Y"
 time_format = "%H:%M:%S"
@@ -20,8 +21,17 @@ traci_constants = {"vehicle": {
                                 "halting_no": tc.LAST_STEP_VEHICLE_HALTING_NUMBER, "lsm_occupancy": tc.LAST_STEP_OCCUPANCY, "last_detection": tc.LAST_STEP_TIME_SINCE_DETECTION},
                    "geometry": {
                                 "vehicle_count": tc.LAST_STEP_VEHICLE_NUMBER, "vehicle_ids": tc.LAST_STEP_VEHICLE_ID_LIST, "vehicle_speed": tc.LAST_STEP_MEAN_SPEED,
-                                "halting_no": tc.LAST_STEP_VEHICLE_HALTING_NUMBER, "occupancy": tc.LAST_STEP_OCCUPANCY}
+                                "halting_no": tc.LAST_STEP_VEHICLE_HALTING_NUMBER, "vehicle_occupancy": tc.LAST_STEP_OCCUPANCY}
                   }
+
+valid_detector_val_keys = ["type", "position", "vehicle_count", "vehicle_ids", "lsm_speed", "halting_no", "last_detection", "lsm_occupancy", "avg_vehicle_length"]
+
+valid_set_vehicle_val_keys = ["colour", "highlight", "speed", "max_speed", "acceleration", "lane_idx", "destination", "route_id", "route_edges", "speed_safety_checks", "lc_safety_checks"]
+valid_get_vehicle_val_keys = ["type", "length", "departure", "origin", "destination", "route_edges"] + list(traci_constants["vehicle"].keys())
+
+valid_set_geometry_val_keys = ["max_speed", "allowed", "disallowed", "left_lc", "right_lc"]
+valid_get_geometry_val_keys = ["avg_vehicle_length", "curr_travel_time", "ff_travel_time", "emissions", "length", "connected_edges", "incoming_edges", "outgoing_edges", "junction_ids",
+                               "street_name", "n_lanes", "lane_ids", "max_speed", "egde_id", "n_links"] + valid_set_geometry_val_keys + list(traci_constants["geometry"].keys())
 
 class Units(Enum):
     METRIC = 1
@@ -262,7 +272,10 @@ def load_params(parameters: str|dict, params_name: str|None = None, step: int|No
     return parameters
 
 def get_aggregated_data(data_vals, time_steps, interval, avg=True):
-
+    """
+    :return (list, list): Aggregated data, time steps
+    """
+    
     agg_start, agg_data, agg_steps = 0, [], []
     while agg_start < len(data_vals):
         period_data = data_vals[agg_start:int(min(agg_start+interval, len(data_vals)))]
@@ -321,12 +334,32 @@ def limit_vals_by_range(time_steps, data_vals=None, time_range=None) -> list|tup
     else: return [step for step in time_steps if step >= time_range[0] and step <= time_range[1]]
 
 def get_most_similar_string(input_string, valid_strings, req_similarity=0.6):
-    best_match, similarity = None, 0
+    best_match, best_similarity = None, 0
     for valid_string in valid_strings:
-        val = len((set(input_string.lower())).intersection(set(valid_string.lower())))
-        if val > similarity and val >= req_similarity * len(valid_string):
-            best_match, similarity = valid_string, val
+        similarity = SequenceMatcher(None, input_string, valid_string).ratio()
+        if similarity > best_similarity and similarity >= req_similarity:
+            best_match, best_similarity = valid_string, similarity
     return best_match
+
+def test_valid_string(input_string, valid_strings, param_name, case_sensitive=True, req_similarity=0.6):
+    if not isinstance(input_string, str):
+        desc = "Invalid {0} '{1}' (must be 'str', not '{2}').".format(param_name, input_string, type(input_string).__name__)
+        return TypeError, desc
+
+    if case_sensitive: found = input_string in valid_strings
+    elif not case_sensitive: found = input_string.upper() in [string.upper() for string in valid_strings]
+    else: found = False
+
+    if not found:
+        valid_strings.sort()
+        desc = "Unknown {0} '{1}'".format(param_name, input_string)
+        closest = get_most_similar_string(input_string, valid_strings, req_similarity)
+        if closest != None: desc = desc + ". Did you mean '{0}'?".format(closest)
+        else: desc = desc + " (must be ['{0}']).".format("'|'".join(valid_strings))
+
+        return ValueError, desc
+
+    return None, None
 
 def test_input_dict(input_dict, valid_params, dict_name="", required=None) -> str:
 
@@ -348,7 +381,7 @@ def test_input_dict(input_dict, valid_params, dict_name="", required=None) -> st
         if key not in valid_params:
             desc = "Unrecognised {0}parameter '{1}'".format(dict_name, key)
             close_match = get_most_similar_string(key, valid_params.keys())
-            desc = "{0}. did you mean '{1}'?".format(desc, close_match) if close_match != None else desc + "."
+            desc = "{0}. Did you mean '{1}'?".format(desc, close_match) if close_match != None else desc + "."
             return (KeyError, desc)
         if not isinstance(item, valid_params[key]):
             if isinstance(valid_params[key], (list, tuple)):
