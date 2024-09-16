@@ -6,8 +6,5 @@
 !*.rou.xml
 /dist
 dev/*
-tud_sumo/capacity_drop/*
-tud_sumo/ramp_metering/*
-tud_sumo/ramp_metering/rm.py
-tud_sumo/rm_plot.py
 build/*
+scenarios.py

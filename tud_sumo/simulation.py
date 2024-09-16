@@ -174,7 +174,6 @@ class Simulation:
         self.step_length = float(traci.simulation.getOption("step-length"))
 
         if self._junc_phases != None: self._update_lights()
-        self._time_val = traci.simulation.getTime()
 
         # Get all static information for detectors (position, lanes etc.),
         # and add subscriptions for their data.
@@ -987,8 +986,6 @@ class Simulation:
         
         # Step through simulation
         traci.simulationStep()
-        time_diff = traci.simulation.getTime() - self._time_val
-        self._time_val = traci.simulation.getTime()
 
         # Update all vehicle ID lists
         all_prev_vehicle_ids = self._all_curr_vehicle_ids
@@ -1018,7 +1015,7 @@ class Simulation:
         if self._junc_phases != None:
             update_junc_lights = []
             for junction_id, phases in self._junc_phases.items():
-                phases["curr_time"] += time_diff
+                phases["curr_time"] += self.step_length
                 if phases["curr_time"] >= phases["cycle_len"]:
                     phases["curr_time"] -= phases["cycle_len"]
                     phases["curr_phase"] = 0
@@ -1681,7 +1678,7 @@ class Simulation:
         
         self.set_phases(junc_phases, overwrite=False)
 
-    def set_tl_metering_rate(self, rm_id: str|int, metering_rate: int|float, g_time: int|float = 1, y_time: int|float = 1, min_red: int|float = 1, control_interval: int = 60) -> dict:
+    def set_tl_metering_rate(self, rm_id: str|int, metering_rate: int|float, g_time: int|float = 1, y_time: int|float = 1, min_red: int|float = 1, vehs_per_cycle: int|None = None, control_interval: int = 60) -> dict:
         """
         Set ramp metering rate of a meter at a junction. Uses a one-car-per-green policy with a default
         1s green and yellow time, with red phase duration changed to set flow. All phase durations must
@@ -1691,7 +1688,8 @@ class Simulation:
         :param g_time:           Green phase duration (s), defaults to 1
         :param y_time:           Yellow phase duration (s), defaults to 1
         :param min_red:          Minimum red phase duration (s), defaults to 1
-        :param control_interval: Ramp meter control interval (s) (control interval % cycle length = 0)
+        :param vehs_per_cycle:   Number of vehicles released with each cycle, defaults to the number of lanes
+        :param control_interval: Ramp meter control interval (s)
         :return dict:            Resulting phase dictionary
         """
         
@@ -1715,35 +1713,41 @@ class Simulation:
             else:
                 self.tracked_junctions[rm_id].metering_rates[-1] = metering_rate
 
-        max_flow = (3600 / (g_time + y_time + min_red)) * m_len
+        # Max flow for one-car-per-green
+        max_flow = (3600 / (g_time + y_time + min_red))
         
+        if vehs_per_cycle == None: vehs_per_cycle = m_len
+
+        # Max flow for n-car-per-green (accounting for no. lanes)
+        max_flow *= vehs_per_cycle
+
         # With one lane and a g_time, y_time and min_red of 1s, the meter cannot physically release
-        # more than 1200 veh/hr without reducing minimum red. So, to stop the meter continually
-        # flipping from g-y-r, the meter is set to green for the whole control interval.
+        # more than 1200 veh/hr without reducing minimum red. So, when the metering rate is above
+        # this upper bound, the meter is set to green for the whole control interval.
 
         # This maximum flow is increased with 2 (or more) lanes as, even with 1s green time, this essentially
         # becomes a two-car-per-green policy, and so the maximum flow is doubled.
         if metering_rate > max_flow:
-            phases_dict = {"phases": ["G"*m_len], "times": [control_interval/self.step_length]}
+            phases_dict = {"phases": ["G"*m_len], "times": [control_interval]}
         elif metering_rate == 0:
-            phases_dict = {"phases": ["r"*m_len], "times": [control_interval/self.step_length]}
+            phases_dict = {"phases": ["r"*m_len], "times": [control_interval]}
         elif metering_rate < 0:
             desc = "Metering rate must be greater than 0 (set to '{0}').".format(metering_rate)
             raise_error(ValueError, desc, self.curr_step)
         else:
 
-            # vehs_per_ci = vehicles released/control interval/lane
-            vehs_per_ci = ((metering_rate * control_interval) / 3600) / m_len
-            
+            # Number of vehicles to be released per control interval
+            vehicles_per_ci = (metering_rate / 3600) * control_interval
+
+            # Number of cycles needed per control interval to achieve metering rate
+            n_cycles_per_ci = vehicles_per_ci / vehs_per_cycle
+
             # red time calculated with the number of cycles per control interval, minus g + y time
-            cycle_length = control_interval / vehs_per_ci
+            cycle_length = control_interval / n_cycles_per_ci
             red_time = cycle_length - g_time - y_time
 
-            # Control interval should be divisible by resulting cycle length as below!
-            # sum(phase["times"])/self.step_length * vehs_per_ci == control_interval / self.step_length
             phases_dict = {"phases": ["G"*m_len, "y"*m_len, "r"*m_len],
-                        "times":  [g_time / self.step_length, y_time / self.step_length, red_time / self.step_length]}
-            
+                        "times":  [g_time, y_time, red_time]}
         self.set_phases({rm_id: phases_dict}, overwrite=False)
         return phases_dict
 
