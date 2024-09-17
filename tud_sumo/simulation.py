@@ -361,7 +361,7 @@ class Simulation:
                 with open(csv_file, "r") as fp:
 
                     valid_cols = ["origin", "destination", "route_id", "start_time", "end_time", "start_step", "end_step",
-                                "demand", "number", "vehicle_types", "vehicle_type_dists", "initial_speed", "origin_lane", "insertion_sd"]
+                                  "demand", "number", "vehicle_types", "vehicle_type_dists", "initial_speed", "origin_lane", "origin_pos", "insertion_sd"]
                     demand_idxs = {}
                     reader = csv.reader(fp)
                     for idx, row in enumerate(reader):
@@ -408,7 +408,10 @@ class Simulation:
                                 demand_idxs["initial_speed"] = row.index("initial_speed")
 
                             if "origin_lane" in row:
-                                demand_idxs["origin_lane"] = row.index("vehiorigin_lanecle_types")
+                                demand_idxs["origin_lane"] = row.index("origin_lane")
+
+                            if "origin_pos" in row:
+                                demand_idxs["origin_pos"] = row.index("origin_pos")
 
                             if "insertion_sd" in row:
                                 demand_idxs["insertion_sd"] = row.index("insertion_sd")
@@ -461,11 +464,15 @@ class Simulation:
                                 if origin_lane.isdigit(): origin_lane = int(origin_lane)
                             else: origin_lane = "best"
 
+                            if "origin_pos" in demand_idxs:
+                                origin_pos = row[demand_idxs["origin_pos"]]
+                            else: origin_pos = "base"
+
                             if "insertion_sd" in demand_idxs:
                                 insertion_sd = float(row[demand_idxs["insertion_sd"]])
                             else: insertion_sd = 1/3
 
-                            self.add_demand(routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, insertion_sd)
+                            self.add_demand(routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, origin_pos, insertion_sd)
                             
             else:
                 desc = "Demand file '{0}' not found.".format(csv_file)
@@ -477,7 +484,7 @@ class Simulation:
         self._manual_flow = True
         self._demand_files.append(csv_file)
 
-    def add_demand(self, routing: str|list|tuple, step_range: list|tuple, demand: int|float, vehicle_types: str|list|tuple|None = None, vehicle_type_dists: list|tuple|None = None, initial_speed: str|int|float = "max", origin_lane: str|int|float = "best", insertion_sd: float = 1/3):
+    def add_demand(self, routing: str|list|tuple, step_range: list|tuple, demand: int|float, vehicle_types: str|list|tuple|None = None, vehicle_type_dists: list|tuple|None = None, initial_speed: str|int|float = "max", origin_lane: str|int|float = "best", origin_pos: str|int = "base", insertion_sd: float = 1/3):
         """
         Adds traffic flow demand for a specific route and time.
         :param routing:            Either a route ID or OD pair of edge IDs
@@ -534,12 +541,12 @@ class Simulation:
         # Create demand table if adding flow for the first time
         if not self._manual_flow:
             self._manual_flow = True
-            self._demand_headers = ["routing", "step_range", "veh/step", "vehicle_types", "vehicle_type_dists", "init_speed", "origin_lane", "insertion_sd"]
+            self._demand_headers = ["routing", "step_range", "veh/step", "vehicle_types", "vehicle_type_dists", "init_speed", "origin_lane", "origin_pos", "insertion_sd"]
             self._demand_arrs, self._man_flow_id = [], 0
 
-        self._demand_arrs.append([routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, insertion_sd])
+        self._demand_arrs.append([routing, step_range, demand, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, origin_pos, insertion_sd])
 
-    def add_demand_function(self, routing: str|list|tuple, step_range: list|tuple, demand_function, parameters: dict|None = None, vehicle_types: str|list|tuple|None = None, vehicle_type_dists: list|tuple|None = None, initial_speed: str|int|float = "max", origin_lane: str|int|float = "best", insertion_sd: float = 1/3):
+    def add_demand_function(self, routing: str|list|tuple, step_range: list|tuple, demand_function, parameters: dict|None = None, vehicle_types: str|list|tuple|None = None, vehicle_type_dists: list|tuple|None = None, initial_speed: str|int|float = "max", origin_lane: str|int|float = "best", origin_pos: str|int = "base", insertion_sd: float = 1/3):
         """
         Adds traffic flow demand calculated for each step using a 'demand_function'.
         'step' is the only required parameter of the function.
@@ -573,7 +580,7 @@ class Simulation:
             # Skip if equal to or less than 0
             if demand_val <= 0: continue
 
-            self.add_demand(routing, (step_no, step_no), demand_val, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, insertion_sd)
+            self.add_demand(routing, (step_no, step_no), demand_val, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, origin_pos, insertion_sd)
 
     def _add_demand_vehicles(self) -> None:
         """
@@ -593,7 +600,8 @@ class Simulation:
                 vehicle_type_dists = demand_arr[4]
                 initial_speed = demand_arr[5]
                 origin_lane = demand_arr[6]
-                insertion_sd = demand_arr[7]
+                origin_pos = demand_arr[7]
+                insertion_sd = demand_arr[8]
                 
                 added = 0
                 if veh_per_step <= 0: continue
@@ -616,7 +624,7 @@ class Simulation:
 
                     vehicle_id = "{0}_md_{1}".format(vehicle_type, self._man_flow_id)
                     
-                    self.add_vehicle(vehicle_id, vehicle_type, routing, initial_speed, origin_lane)
+                    self.add_vehicle(vehicle_id, vehicle_type, routing, initial_speed, origin_lane, origin_pos)
 
                     added += 1
                     self._man_flow_id += 1
@@ -1786,7 +1794,7 @@ class Simulation:
                 new_phase = "".join([new_phase[i] if new_phase[i] != '-' else curr_setting[i] for i in range(len(new_phase))])
             traci.trafficlight.setRedYellowGreenState(junction_id, new_phase)
 
-    def add_vehicle(self, vehicle_id: str, vehicle_type: str, routing: str|list|tuple, initial_speed: str|float="max", origin_lane: str|int="best") -> None:
+    def add_vehicle(self, vehicle_id: str, vehicle_type: str, routing: str|list|tuple, initial_speed: str|float="max", origin_lane: str|int="best", origin_pos: str|int = "base") -> None:
         """
         Add a new vehicle into the simulation.
         :param vehicle_id:    ID for new vehicle, must be unique
@@ -1822,8 +1830,8 @@ class Simulation:
             route_id = routing
             routing = self.route_exists(route_id)
             if routing != None:
-                if vehicle_type != "default": traci.vehicle.add(vehicle_id, route_id, vehicle_type, departLane=origin_lane, departSpeed=initial_speed)
-                else: traci.vehicle.add(vehicle_id, route_id, departLane=origin_lane, departSpeed=initial_speed)
+                if vehicle_type != "default": traci.vehicle.add(vehicle_id, route_id, vehicle_type, departLane=origin_lane, departSpeed=initial_speed, departPos=origin_pos)
+                else: traci.vehicle.add(vehicle_id, route_id, departLane=origin_lane, departSpeed=initial_speed, departPos=origin_pos)
             else:
                 desc = "Route ID '{0}' not found.".format(route_id)
                 raise_error(KeyError, desc, self.curr_step)
@@ -1853,8 +1861,8 @@ class Simulation:
                     traci.route.add(route_id, routing)
                     self._all_routes[route_id] = tuple(routing)
 
-                if vehicle_type != "default": traci.vehicle.add(vehicle_id, route_id, vehicle_type, departLane=origin_lane, departSpeed=initial_speed)
-                else: traci.vehicle.add(vehicle_id, route_id, departLane=origin_lane, departSpeed=initial_speed)
+                if vehicle_type != "default": traci.vehicle.add(vehicle_id, route_id, vehicle_type, departLane=origin_lane, departSpeed=initial_speed, departPos=origin_pos)
+                else: traci.vehicle.add(vehicle_id, route_id, departLane=origin_lane, departSpeed=initial_speed, departPos=origin_pos)
                 self._vehicles_in(vehicle_id)
 
             else:
