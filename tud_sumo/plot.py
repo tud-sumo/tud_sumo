@@ -1846,8 +1846,8 @@ class Plotter:
             desc = "No trip data to plot."
             raise_error(ValueError, desc)
 
-        start = max(time_range[0], self.sim_data["start"])
-        end = min(time_range[1], self.sim_data["end"])
+        start = int(max(time_range[0], self.sim_data["start"]))
+        end = int(min(time_range[1], self.sim_data["end"]))
 
         x_vals = list(range(start, end + 1))
         y_vals = [0] * (len(x_vals))
@@ -2004,8 +2004,10 @@ class Plotter:
                 
                 statuses, all_statuses = {}, ["scheduled", "active", "completed"]
 
+                if isinstance(event_ids, str) and event_ids not in all_statuses + ["all"]: event_ids = [event_ids]
+
                 if isinstance(event_ids, str):
-                    if event_ids.upper() == "ALL":
+                    if event_ids == "all":
                         event_ids = []
                         for status in all_statuses:
                             if status in self.sim_data["data"]["events"]:
