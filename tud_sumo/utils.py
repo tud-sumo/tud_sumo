@@ -232,8 +232,12 @@ def get_cumulative_arr(arr: list, start: int=0) -> list:
 def get_scenario_name(filepath: str) -> str:
     """
     Get scenario name from filepath.
-    :param filepath: SUMO filename
-    :return str:     Scenario name
+    
+    Args:
+        `filepath` (str): SUMO filename
+    
+    Returns:
+        str: Scenario name
     """
     cfg_file = filepath.split('/')[-1]
     if cfg_file.endswith('.sumocfg'): cfg_file = cfg_file.removesuffix('.sumocfg')
@@ -246,10 +250,14 @@ def get_scenario_name(filepath: str) -> str:
 def load_params(parameters: str|dict, params_name: str|None = None, step: int|None = None) -> dict:
     """
     Load parameters file. Handles either dict or json file.
-    :param parameters:  Parameters dict or filepath
-    :param params_name: Parameter dict function (for error messages)
-    :param step:        Current simulation step (for error messages)
-    :return dict:       Parameters dict
+    
+    Args:
+        `parameters` (str, dict): Parameters dict or filepath
+        `params_name` (str, None): Parameter dict function (for error messages)
+        `step` (int, None): Current simulation step (for error messages)
+    
+    Returns:
+        dict: Parameters dict
     """
 
     caller = "{0}.{1}()".format(inspect.currentframe().f_back.f_locals['self'].__name__(), inspect.currentframe().f_back.f_code.co_name)
@@ -273,7 +281,14 @@ def load_params(parameters: str|dict, params_name: str|None = None, step: int|No
 
 def get_aggregated_data(data_vals, time_steps, interval, avg=True):
     """
-    :return (list, list): Aggregated data, time steps
+    Args:
+        `data_vals` (list): Data values array
+        `time_steps` (list): List of time step values
+        `interval` (int): Aggregation interval
+        `avg` (bool): Denotes whether to average/sum values
+
+    Returns:
+        (list, list): Aggregated data, time steps
     """
     
     agg_start, agg_data, agg_steps = 0, [], []
@@ -291,9 +306,13 @@ def get_aggregated_data(data_vals, time_steps, interval, avg=True):
 def get_axis_lim(data_vals, end_buff = 0.05):
     """
     Get axis limit rounded to nearest 1000/100/10 (with buffer).
-    :param data_vals: Single (max) axis value, or list of values
-    :param end_buff:  Minimum axis buffer above maximum value (default to 5%)
-    :return float:    Axis limit
+    
+    Args:
+        `data_vals`: Single (max) axis value, or list of values
+        `end_buff`: Minimum axis buffer above maximum value (default to 5%)
+    
+    Returns:
+        float: Axis limit
     """
     
     pct_buff = 1 + end_buff
@@ -313,10 +332,14 @@ def get_axis_lim(data_vals, end_buff = 0.05):
 def limit_vals_by_range(time_steps, data_vals=None, time_range=None) -> list|tuple:
     """
     For plotting, to limit data values between to those within a given time range.
-    :param time_steps: List of time step values
-    :param data_vals:  List of data values, same length as time_steps, (if not given, only time_steps is limited)
-    :param time_range: (1x2) array containing minimum and maximum time step values (if not given, data is returned unchanged)
-    :return (list):    Limited time_steps (& data_vals if given, where tuple returned is (steps, vals))
+    
+    Args:
+        `time_steps`: List of time step values
+        `data_vals`: List of data values, same length as time_steps, (if not given, only time_steps is limited)
+        `time_range`: (1x2) array containing minimum and maximum time step values (if not given, data is returned unchanged)
+    
+    Returns:
+        list: Limited time_steps (& data_vals if given, where tuple returned is (steps, vals))
     """
 
     if time_range == None or (time_range[0] < time_steps[0] and time_range[1] > time_steps[-1]):

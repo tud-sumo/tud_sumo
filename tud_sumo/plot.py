@@ -25,14 +25,17 @@ tud_colours = {"cyaan": "#00A6D6", "donkerblauw": "#0C2340", "turkoois": "#00B8C
                "framboos": "#A50034", "rood": "#E03C31", "oranje": "#EC6842", "geel": "#FFB81C", "lichtgroen": "#6CC24A", "donkergroen": "#009B77"}
 
 class Plotter:
+    """ Visualisation class that plots TUD-SUMO specific data. """
+
     def __init__(self, simulation: Simulation|str, sim_label: str|None=None, time_unit: str="seconds", save_fig_loc: str="", save_fig_dpi: int=600, overwrite_figs: bool=True) -> None:
         """
-        :param simulation:     Either simulation object, sim_data dict or sim_data filepath
-        :param sim_label:      Simulation or scenario label added to the beginning of all plot titles (set to 'scenario' for scenario name)
-        :param time_unit:      Plotting time unit used for all plots (must be ['steps'|'seconds'|'minutes'|'hours'])
-        :param save_fig_loc:   Figure filepath when saving (defaults to current file)
-        :param save_fig_dpi:   Figure dpi when saving (defaults to 600dpi)
-        :param overwrite_figs: Bool denoting whether to allow overwriting of saved figures with the same name
+        Args:
+            `simulation` (Simulation, str): Either simulation object, sim_data dict or sim_data filepath
+            `sim_label` (str, None): Simulation or scenario label added to the beginning of all plot titles (set to 'scenario' for scenario name)
+            `time_unit` (str): Plotting time unit used for all plots (must be ['_steps_'|'_seconds_'|'_minutes_'|'_hours_'])
+            `save_fig_loc` (str): Figure filepath when saving (defaults to current file)
+            `save_fig_dpi` (int): Figure dpi when saving (defaults to 600dpi)
+            `overwrite_figs` (bool): Denotes whether to allow overwriting of saved figures with the same name
         """
 
         self.simulation = None
@@ -127,7 +130,9 @@ class Plotter:
     def _display_figure(self, filename: str|None=None) -> None:
         """
         Display figure, either saving to file or showing on screen.
-        :param filename: Save file name, if saving
+        
+        Args:
+            `filename` (str, None): Save file name, if saving
         """
 
         if filename is None: plt.show()
@@ -148,13 +153,15 @@ class Plotter:
     def plot_junc_flows(self, junc_id: str, vehicle_types: list|tuple|None=None, plot_all: bool=True, time_range: list|tuple|None=None, show_events: str|list|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot junction flow, either as inflow & outflow or number of vehicles at the intersection.
-        :param junc_id:       Junction ID
-        :param vehicle_types: Vehicle type ID or list of IDs
-        :param plot_all:      If true, plot total values as well as vehicle type data
-        :param time_range:    Plotting time range (in plotter class units)
-        :param show_events:   Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param fig_title:     If given, will overwrite default title
-        :param save_fig:      Output image filename, will show image if not given
+        
+        Args:
+            `junc_id` (str): Junction ID
+            `vehicle_types` (list, tuple, None): Vehicle type ID or list of IDs
+            `plot_all` (bool): If `True`, plot total values as well as vehicle type data
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -226,11 +233,13 @@ class Plotter:
     def plot_tl_colours(self, tl_id: str, plt_movements: list|tuple|None=None, plot_percent: bool=False, time_range: list|tuple|None=None, save_fig: str|None=None) -> None:
         """
         Plot traffic light sequence, as colours or green/red/yellow durations as a percent of time.
-        :param tl_id:         Traffic light ID
-        :param plt_movements: List of movements to plot by index (defaults to all)
-        :param plot_percent:  Denotes whether to plot colours as percent of time
-        :param time_range:    Plotting time range (in plotter class units)
-        :param save_fig:      Output image filename, will show image if not given
+        
+        Args:
+            `tl_id` (str): Traffic light ID
+            `plt_movements` (list, tuple, None): List of movements to plot by index (defaults to all)
+            `plot_percent` (bool):  Denotes whether to plot colours as percent of time
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         tl_colours = {"G": self.DONKERGROEN, "Y": self.GEEL, "R": self.ROOD}
@@ -371,15 +380,17 @@ class Plotter:
     def plot_rm_rate(self, rm_id: str, ax=None, yax_labels: bool=True, xax_labels: bool=True, show_legend: bool=True, time_range: list|tuple|None=None, show_events: str|list|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot ramp metering rate.
-        :param rm_id:       Ramp meter junction ID
-        :param ax:          Matplotlib axis, used when creating subplots
-        :param yax_labels:  Bool denoting whether to include y-axis labels (for subplots)
-        :param xax_labels:  Bool denoting whether to include x-axis labels (for subplots)
-        :param show_legend: Bool denoting whether to show figure legend
-        :param time_range:  Plotting time range (in plotter class units)
-        :param show_events: Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param fig_title:   If given, will overwrite default title
-        :param save_fig:    Output image filename, will show image if not givenr
+        
+        Args:
+            `rm_id` (str): Ramp meter junction ID
+            `ax` (matplotlib.axes, None): Matplotlib axis, used when creating subplots
+            `yax_labels` (bool): Bool denoting whether to include y-axis labels (for subplots)
+            `xax_labels` (bool): Bool denoting whether to include x-axis labels (for subplots)
+            `show_legend` (bool): Bool denoting whether to show figure legend
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -484,18 +495,19 @@ class Plotter:
         if not is_subplot:
             self._display_figure(save_fig)
 
-    def plot_rm_rate_detector_data(self, rm_ids: str|list|tuple, all_detector_ids: list|tuple, data_key: list|tuple, aggregate_data: int=10, time_range: list|tuple|None=None, show_events: str|list|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_rm_rate_detector_data(self, rm_ids: str|list|tuple, all_detector_ids: list|tuple, data_key: str, aggregate_data: int=10, time_range: list|tuple|None=None, show_events: str|list|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot ramp metering rate next to detector data.
-        :param rm_ids:           Ramp meter junction ID or list of IDs
-        :param all_detector_ids: List of detector IDs or nested list for multiple meters
-        :param data_key:         Plotting data key ["speeds", "vehicle_counts", "occupancies"]
-        :param aggregate_data:   Averaging interval in steps (defaults to 10)
-        :param data_titles:      List of axes titles, if given must have same length as data_keys
-        :param time_range:       Plotting time range (in plotter class units)
-        :param show_events:      Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param fig_title:        If given, will overwrite default title
-        :param save_fig:         Output image filename, will show image if not given
+        
+        Args:
+            `rm_ids` (str, list, tuple): Ramp meter junction ID or list of IDs
+            `all_detector_ids` (list, tuple): List of detector IDs or nested list for multiple meters
+            `data_key` (str): Plotting data key, from '_speeds_', '_vehicle_counts_' and '_occupancies_'
+            `aggregate_data` (int): Averaging interval in steps (defaults to 10)
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
         
         if self.simulation != None:
@@ -599,16 +611,18 @@ class Plotter:
     def plot_rm_queuing(self, rm_id: str, ax=None, yax_labels: bool|list|tuple=True, xax_labels: bool=True, plot_delay: bool=True, cumulative_delay: bool=False, time_range: list|tuple|None=None, show_events: str|list|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot ramp metering rate.
-        :param rm_id:            Ramp meter junction ID
-        :param ax:               Matplotlib axis, used when creating subplots
-        :param yax_labels:       Bool denoting whether to include y-axis labels (for subplots). Either single bool for both y-axis labels or list of two bools to set both y-axes (when plotting delay).
-        :param xax_labels:       Bool denoting whether to include x-axis labels (for subplots)
-        :param plot_delay:       Bool denoting whether to plot queue delay. This will be done on the same plot with a separate y-axis.
-        :param cumulative_delay: Bool denoting whether to plot cumulative delay
-        :param time_range:       Plotting time range (in plotter class units)
-        :param show_events:      Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param fig_title:        If given, will overwrite default title
-        :param save_fig:         Output image filename, will show image if not given
+        
+        Args:
+            `rm_id` (str): Ramp meter junction ID
+            `ax` (matplotlib.axes, None): Matplotlib axis, used when creating subplots
+            `yax_labels` (bool, list, tuple): Bool denoting whether to include y-axis labels (for subplots). Either single bool for both y-axis labels or list of two bools to set both y-axes (when plotting delay).
+            `xax_labels` (bool): Bool denoting whether to include x-axis labels (for subplots)
+            `plot_delay` (bool): Bool denoting whether to plot queue delay. This will be done on the same plot with a separate y-axis.
+            `cumulative_delay` (bool): Bool denoting whether to plot cumulative delay
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -704,12 +718,14 @@ class Plotter:
     def plot_rm_rate_queuing(self, rm_ids: str|list|tuple, plot_queuing: bool=True, time_range: list|tuple|None=None, show_events: str|list|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot meter queue length and delay.
-        :param rm_ids:       Ramp meter junction ID or list of IDs
-        :param plot_queuing: Bool denoting whether to plot queue lengths and delay (set False to only plot metering rate)
-        :param time_range:   Plotting time range (in plotter class units)
-        :param show_events:  Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param fig_title:    If given, will overwrite default title
-        :param save_fig:     Output image filename, will show image if not given
+        
+        Args:
+            `rm_ids` (str, list, tuple): Ramp meter junction ID or list of IDs
+            `plot_queuing` (bool): Bool denoting whether to plot queue lengths and delay (set False to only plot metering rate)
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -760,14 +776,16 @@ class Plotter:
     def plot_vehicle_data(self, data_key: str, plot_cumulative: bool=False, aggregation_steps: int|None=None, time_range: list|tuple|None=None, show_events: str|list|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot network-wide vehicle data.
-        :param data_key:          Data key to plot, either "no_vehicles", "no_waiting", "tts" or "delay"
-        :param plot_cumulative:   Bool denoting whether to plot cumulative values
-        :param aggregation_steps: If given, values are aggregated using this interval
-        :param time_range:        Plotting time range (in plotter class units)
-        :param show_events:       Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param plt_colour:        Line colour for plot (defaults to TUD 'blauw')
-        :param fig_title:         If given, will overwrite default title
-        :param save_fig:          Output image filename, will show image if not given
+        
+        Args:
+            `data_key` (str): Data key to plot, either '_no_vehicles_', '_no_waiting_', '_tts_' or '_delay_'
+            `plot_cumulative` (bool): Bool denoting whether to plot cumulative values
+            `aggregation_steps` (int, None): If given, values are aggregated using this interval
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `plt_colour` (str, None): Line colour for plot (defaults to TUD 'blauw')
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -812,15 +830,17 @@ class Plotter:
     def plot_detector_data(self, detector_id: str, data_key: str, plot_cumulative: bool=False, aggregation_steps: int|None=None, time_range: list|tuple|None=None, show_events: str|list|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot detector data.
-        :param detector_id:       Detector ID
-        :param data_key:          Data key to plot, either "speeds", "vehicle_counts" or "occupancies"
-        :param plot_cumulative:   Bool denoting whether to plot cumulative values
-        :param aggregation_steps: If given, values are aggregated using this interval
-        :param time_range:        Plotting time range (in plotter class units)
-        :param show_events:       Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param plt_colour:        Line colour for plot (defaults to TUD 'blauw')
-        :param fig_title:         If given, will overwrite default title
-        :param save_fig:          Output image filename, will show image if not given
+        
+        Args:
+            `detector_id` (str): Detector ID
+            `data_key` (str): Data key to plot, either '_speeds_', '_vehicle_counts_' or '_occupancies_'
+            `plot_cumulative` (bool): Bool denoting whether to plot cumulative values
+            `aggregation_steps` (int, None): If given, values are aggregated using this interval
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `plt_colour` (str, None): Line colour for plot (defaults to TUD 'blauw')
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
         
         if self.simulation != None:
@@ -872,13 +892,15 @@ class Plotter:
 
     def plot_od_demand(self, routing: str|list|tuple|None=None, plot_sim_dur: bool=True, show_events: str|list|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
-        Plots traffic demand added with TUD-SUMO.
-        :param routing:      Either string (route ID or 'all'), OD pair ('A', 'B') or None (defaulting to all)
-        :param plot_sim_dur: If False, only previous demand in the simulation is plotted, otherwise all demand
-        :param show_events:  Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param plt_colour:   Line colour for plot (defaults to TUD 'blauw')
-        :param fig_title:    If given, will overwrite default title
-        :param save_fig:     Output image filename, will show image if not given
+        Plots traffic demand added with TUD-SUMO. Demand defined within '_.rou.xml_' files is not plotted.
+        
+        Args:
+            `routing` (str, list, tuple, None): Either string (route ID or 'all'), OD pair ('A', 'B') or None (defaulting to all)
+            `plot_sim_dur` (bool): If `False`, only previous demand in the simulation is plotted, otherwise all demand
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `plt_colour` (str, None): Line colour for plot (defaults to TUD 'blauw')
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         demand_arrs = None
@@ -962,13 +984,15 @@ class Plotter:
     def plot_od_trip_times(self, od_pairs: list|tuple|None=None, vehicle_types: list|tuple|None=None, ascending_vals: bool=True, trip_time_unit: str="minutes", time_range: list|tuple|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plots average trip times for Origin-Destination pairs.
-        :param od_pairs:       (n x 2) list containing OD pairs. If not given, all OD pairs are plotted
-        :param vehicle_types:  List of vehicle types for included trips (defaults to all)
-        :param ascending_vals: If true, the largest values are plotted in the bottom-right, if false, top-left
-        :param trip_time_unit: Time unit for displaying values, must be ['seconds'|'minutes'|'hours'], defaults to 'minutes'
-        :param time_range:     Plotting time range (in plotter class units, separate to trip_time_unit parameter)
-        :param fig_title:      If given, will overwrite default title
-        :param save_fig:       Output image filename, will show image if not given
+        
+        Args:
+            `od_pairs` (list, tuple, None): (n x 2) list containing OD pairs. If not given, all OD pairs are plotted
+            `vehicle_types` (list, tuple, None): List of vehicle types for included trips (defaults to all)
+            `ascending_vals` (bool): If `True`, the largest values are plotted in the bottom-right, if `False`, top-left
+            `trip_time_unit` (str): Time unit for displaying values, must be ['_seconds_'|'_minutes_'|'_hours_'], defaults to '_minutes_'
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
         
         if trip_time_unit not in ["seconds", "minutes", "hours"]:
@@ -1089,13 +1113,15 @@ class Plotter:
     def plot_cumulative_curve(self, inflow_detectors: list|tuple|None=None, outflow_detectors: list|tuple|None=None, outflow_offset: int|float=0, time_range: list|tuple|None=None, show_events: str|list|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot inflow and outflow cumulative curves, either system-wide or using inflow/outflow detectors (if given).
-        :param inflow_detectors:  List of inflow detectors
-        :param outflow_detectors: List of outflow detectors
-        :param outflow_offset:    Offset for outflow values if not starting at t=0
-        :param time_range:        Plotting time range (in plotter class units)
-        :param show_events:       Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param fig_title:         If given, will overwrite default title
-        :param save_fig:          Output image filename, will show image if not given
+        
+        Args:
+            `inflow_detectors` (list, tuple, None): List of inflow detectors
+            `outflow_detectors` (list, tuple, None): List of outflow detectors
+            `outflow_offset` (int, float): Offset for outflow values if not starting at t=0
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -1190,12 +1216,14 @@ class Plotter:
     def plot_vsl_data(self, vsl_id: str, avg_geomtry_speeds: bool=False, time_range: list|tuple|None=None, show_events: str|list|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot VSL settings and average vehicle speeds on affected edges.
-        :param vsl_id:              VSL controller ID
-        :param avg_geometry_speeds: Bool denoting whether to plot average edge speed, or individual edge data
-        :param time_range:          Plotting time range (in plotter class units)
-        :param show_events:         Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param fig_title:           If given, will overwrite default title
-        :param save_fig:            Output image filename, will show image if not given
+        
+        Args:
+            `vsl_id` (str): VSL controller ID
+            `avg_geometry_speeds` (bool): Bool denoting whether to plot average edge speed, or individual edge data
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -1320,14 +1348,16 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def plot_rg_data(self, rg_id: str, time_range: list|tuple|None=None, show_events: str|list|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_rg_data(self, rg_id: str, time_range: list|tuple|None=None, show_events: str|list|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot how many vehicles are diverted by RG controller.
-        :param rg_id:       RG controller ID
-        :param show_events: Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param plt_colour:  Line colour for plot (defaults to TUD 'blauw')
-        :param fig_title:   If given, will overwrite default title
-        :param save_fig:    Output image filename, will show image if not given
+        
+        Args:
+            `rg_id` (str): RG controller ID
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -1404,11 +1434,13 @@ class Plotter:
     def plot_space_time_diagram(self, edge_ids: list|tuple, upstream_at_top: bool=True, time_range: list|tuple|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot space time data from tracked edge data.
-        :param edge_ids:        Single tracked egde ID or list of IDs
-        :param upstream_at_top: If true, upstream values are displayed at the top of the diagram
-        :param time_range:      Plotting time range (in plotter class units)
-        :param fig_title:       If given, will overwrite default title
-        :param save_fig:        Output image filename, will show image if not given
+        
+        Args:
+            `edge_ids` (list, tuple): Single tracked egde ID or list of IDs
+            `upstream_at_top` (bool): If `True`, upstream values are displayed at the top of the diagram
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -1506,18 +1538,20 @@ class Plotter:
 
         self._display_figure(save_fig)
 
-    def plot_trajectories(self, edge_ids: list|tuple, lane_idx: int|None=None, vehicle_pct: float=1, rnd_seed: int|None=None, time_range: list|tuple|None=None, show_events: str|list|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
+    def plot_trajectories(self, edge_ids: str|list|tuple, lane_idx: int|None=None, vehicle_pct: float=1, rnd_seed: int|None=None, time_range: list|tuple|None=None, show_events: str|list|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot vehicle trajectory data from tracked edge data.
-        :param edge_ids:    Single tracked egde ID or list of IDs
-        :param lane_idx:    Lane index for vehicles on all edges
-        :param vehicle_pct: Percent of vehicles plotted (defaults to all)
-        :param rnd_seed:    When vehicle_pct < 1, vehicles are selected randomly with rnd_seed
-        :param time_range:  Plotting time range (in plotter class units)
-        :param show_events: Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param plt_colour:  Line colour for plot (defaults to TUD 'blauw')
-        :param fig_title:   If given, will overwrite default title
-        :param save_fig:    Output image filename, will show image if not given
+        
+        Args:
+            `edge_ids` (str, list, tuple): Edge ID or list of IDs
+            `lane_idx` (int, None): Lane index for vehicles on all edges
+            `vehicle_pct` (float): Percent of vehicles plotted (defaults to all)
+            `rnd_seed` (int, None): When `vehicle_pct < 1`, vehicles are selected randomly with `rnd_seed`
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `plt_colour` (str, None): Line colour for plot (defaults to TUD 'blauw')
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -1666,18 +1700,20 @@ class Plotter:
     def plot_fundamental_diagram(self, edge_ids: list|tuple|str|None=None, x_axis: str="density", y_axis: str="flow", x_percentile: int=100, y_percentile: int=100, aggregation_steps: int=0, separate_edges: bool=False, point_size: int=3, time_range: list|tuple|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plot a fundamental diagram from tracked egde data.
-        :param edge_ids:          Single tracked edge ID or list of IDs
-        :param x_axis:            x-axis variable ('s'|'f'|'d'|'speed'|'flow'|'density')
-        :param y_axis:            y-axis variable ('s'|'f'|'d'|'speed'|'flow'|'density')
-        :param x_percentile:      x-axis value plotting percentile [1-100]
-        :param y_percentile:      y-axis value plotting percentile [1-100]
-        :param aggregation_steps: If given, values are aggregated using this interval
-        :param separate_edges:    If True, individual edges are plotted with separate colours
-        :param point_size:        Scatter graph point size
-        :param time_range:        Plotting time range (in plotter class units)
-        :param plt_colour:        Line colour for plot (defaults to TUD 'blauw')
-        :param fig_title:         If given, will overwrite default title
-        :param save_fig:          Output image filename, will show image if not given
+        
+        Args:
+            `edge_ids` (list, tuple, str, None): Single tracked edge ID or list of IDs
+            `x_axis` (str): x-axis variable ('_s_'|'_f_'|'_d_'|'_speed_'|'_flow_'|'_density_')
+            `y_axis` (str): y-axis variable ('_s_'|'_f_'|'_d_'|'_speed_'|'_flow_'|'_density_')
+            `x_percentile` (int): x-axis value plotting percentile [1-100]
+            `y_percentile` (int): y-axis value plotting percentile [1-100]
+            `aggregation_steps` (int): If given, values are aggregated using this interval
+            `separate_edges` (bool): If True, individual edges are plotted with separate colours
+            `point_size` (int): Scatter graph point size
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `plt_colour` (str, None): Line colour for plot (defaults to TUD 'blauw')
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -1810,14 +1846,15 @@ class Plotter:
     def plot_throughput(self, od_pair: list|tuple|None=None, vehicle_types: list|tuple|None=None, time_range: list|tuple|None=None, show_events: str|list|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plots vehicle throughput, ie. the rate of completed trips.
-        :param od_pair:         (n x 2) list containing OD pairs. If not given, all OD pairs are plotted
-        :param cumulative_hist: Denotes whether to plot histogram values cumulatively
-        :param vehicle_types:   List of vehicle types to include (defaults to all)
-        :param time_range:      Plotting time range (in plotter class units)
-        :param show_events:     Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
-        :param plt_colour:      Line colour for plot (defaults to TUD 'blauw')
-        :param fig_title:       If given, will overwrite default title
-        :param save_fig:        Output image filename, will show image if not given
+        
+        Args:
+            `od_pair` (list, tuple, None): (n x 2) list containing OD pairs. If not given, all OD pairs are plotted
+            `vehicle_types` (list, tuple, None): List of vehicle types to include (defaults to all)
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `show_events` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
+            `plt_colour` (str, None): Line colour for plot (defaults to TUD 'blauw')
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
 
         if self.simulation != None:
@@ -1889,14 +1926,16 @@ class Plotter:
     def plot_trip_time_histogram(self, od_pair: list|tuple|None=None, n_bins: int|None=None, cumulative_hist: bool=False, vehicle_types: list|tuple|None=None, time_range: list|tuple|None=None, plt_colour: str|None=None, fig_title: str|None=None, save_fig: str|None=None) -> None:
         """
         Plots a histogram for (completed) trip times, either network-wide or for a specific OD pair.
-        :param od_pair:         (n x 2) list containing OD pairs. If not given, all OD pairs are plotted
-        :param n_bins:          Number of bins in the histogram, calculated using the Freedman-Diaconis rule if not given
-        :param cumulative_hist: Denotes whether to plot histogram values cumulatively
-        :param vehicle_types:   List of vehicle types to include (defaults to all)
-        :param time_range:      Plotting time range (in plotter class units)
-        :param plt_colour:      Line colour for plot (defaults to TUD 'blauw')
-        :param fig_title:       If given, will overwrite default title
-        :param save_fig:        Output image filename, will show image if not given
+        
+        Args:
+            `od_pair` (list, tuple, None): (n x 2) list containing OD pairs. If not given, all OD pairs are plotted
+            `n_bins` (int, None): Number of bins in the histogram, calculated using the Freedman-Diaconis rule if not given
+            `cumulative_hist` (bool): Denotes whether to plot histogram values cumulatively
+            `vehicle_types` (list, tuple, None): List of vehicle types to include (defaults to all)
+            `time_range` (list, tuple, None): Plotting time range (in plotter class units)
+            `plt_colour` (str, None): Line colour for plot (defaults to TUD 'blauw')
+            `fig_title` (str, None): If given, will overwrite default title
+            `save_fig` (str, None): Output image filename, will show image if not given
         """
         
         if self.simulation != None:
@@ -1995,8 +2034,10 @@ class Plotter:
     def _plot_event(self, ax, event_ids: str|list|None=None) -> None:
         """
         Plot events from the simulation data on a given axes.
-        :param ax:        matplotlib.pyplot.axes object
-        :param event_ids: Event ID, list of IDs, 'all', 'scheduled', 'active', 'completed' or None
+        
+        Args:
+            `ax` (matplotlib.axes): matplotlib axes
+            `event_ids` (str, list, None): Event ID, list of IDs, '_all_', '_scheduled_', '_active_', '_completed_' or `None`
         """
 
         if event_ids != None:

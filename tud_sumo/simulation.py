@@ -11,11 +11,25 @@ from shapely.geometry import LineString, Point
 from .utils import *
 
 class Simulation:
-    def __init__(self, scenario_name: str|None = None, scenario_desc: str|None = None) -> None:
+    """ Main simulation interface."""
+
+    def __init__(self, scenario_name: str|None = None, scenario_desc: str|None = None, sumo_home: str|None = None) -> None:
         """
-        :param scenario_name: Scenario label saved to simulation object (defaults to name of '.sumocfg')
-        :param scenario_desc: Simulation scenario description, saved along with all files
+        Args:
+            `scenario_name` (str, None): Scenario label saved to simulation object (defaults to name of '_.sumocfg_')
+            `scenario_desc` (str, None): Simulation scenario description, saved along with all files
+            `sumo_home` (str, None): SUMO base directory, if `$SUMO_HOME` variable not already set within environment
         """
+
+        if isinstance(sumo_home, str):
+            if os.path.exists(sumo_home):
+                os.environ["SUMO_HOME"] = sumo_home
+            else:
+                desc = "SUMO_HOME filepath '{0}' does not exist.".format(sumo_home)
+                raise_error(FileNotFoundError, desc)
+        elif sumo_home != None:
+            desc = "Invalid SUMO_HOME '{0}' (must be str, not '{1}').".format(sumo_home, type(sumo_home).__name__)
+            raise_error(TypeError, desc)
 
         if "SUMO_HOME" in os.environ:
             path_tools = os.path.join(os.environ.get("SUMO_HOME"), 'tools')
@@ -92,20 +106,22 @@ class Simulation:
     def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, gui_file: str|None = None, cmd_options: list|None = None, units: str|int = 1, get_individual_vehicle_data: bool = True, automatic_subscriptions: bool = True, suppress_warnings: bool = False, suppress_traci_warnings: bool = True, suppress_pbar: bool = False, seed: str = "random", gui: bool = False) -> None:
         """
         Intialises SUMO simulation.
-        :param config_file:                 Location of '.sumocfg' file (can be given instead of net_file)
-        :param net_file:                    Location of '.net.xml' file (can be given instead of config_file)
-        :param route_file:                  Location of '.rou.xml' route file
-        :param add_file:                    Location of '.add.xml' additional file
-        :param gui_file:                    Location of '.xml' gui (view settings) file
-        :param cmd_options:                 List of any other command line options
-        :param units:                       Data collection units [1 (metric) | 2 (IMPERIAL) | 3 (UK)] (defaults to 'metric')
-        :param get_individual_vehicle_data: Denotes whether to get individual vehicle data (set to False to improve performance)
-        :param automatic_subscriptions:     Denotes whether to automatically subscribe to commonly used vehicle data (speed and position, defaults to True)
-        :param suppress_warnings:           Suppress simulation warnings
-        :param suppress_traci_warnings:     Suppress warnings from TraCI
-        :param suppress_pbar:               Suppress automatic progress bar when not using the GUI
-        :param seed:                        Either int to be used as seed, or random.random()/random.randint(), where a random seed is used
-        :param gui:                         Bool denoting whether to run GUI
+
+        Args:
+            `config_file` (str, None): Location of '_.sumocfg_' file (can be given instead of net_file)
+            `net_file` (str, None): Location of '_.net.xml_' file (can be given instead of config_file)
+            `route_file` (str, None): Location of '_.rou.xml_' route file
+            `add_file` (str, None): Location of '_.add.xml_' additional file
+            `gui_file` (str, None): Location of '_.xml_' gui (view settings) file
+            `cmd_options` (list, None): List of any other command line options
+            `units` (str, int): Data collection units [1 (metric) | 2 (IMPERIAL) | 3 (UK)] (defaults to 'metric')
+            `get_individual_vehicle_data` (bool): Denotes whether to get individual vehicle data (set to `False` to improve performance)
+            `automatic_subscriptions` (bool): Denotes whether to automatically subscribe to commonly used vehicle data (speed and position, defaults to `True`)
+            `suppress_warnings` (bool): Suppress simulation warnings
+            `suppress_traci_warnings` (bool): Suppress warnings from TraCI
+            `suppress_pbar` (bool): Suppress automatic progress bar when not using the GUI
+            `seed` (bool): Either int to be used as seed, or `random.random()`/`random.randint()`, where a random seed is used
+            `gui` (bool): Bool denoting whether to run GUI
         """
 
         self._start_called = True
@@ -231,6 +247,14 @@ class Simulation:
             print("  - Start time: {0}".format(self._sim_start_time))
 
     def save_objects(self, filename: str|None = None, overwrite: bool = True, json_indent: int|None = 4) -> None:
+        """
+        Save parameters of all TUD-SUMO objects created for the simulation (tracked edges/junctions, phases, controllers, events, demand, routes).
+
+        Args:
+            `filename` (str, None): Output filename ('_.json_' or '_.pkl_')
+            `overwrite` (bool): Denotes whether to overwrite previous outputs
+            `json_indent` (int, None): Indent used when saving JSON files
+        """
 
         object_params = {}
 
@@ -294,9 +318,10 @@ class Simulation:
 
     def load_objects(self, object_parameters: str|dict) -> None:
         """
-        Load all parameters for TUD SUMO objects: tracked edges/junctions, signal
-        phases, controllers and events.
-        :param object_parameters: Either dict containing object parameters or '.json|.pkl' filepath
+        Load parameters of all TUD-SUMO objects created for the simulation (tracked edges/junctions, phases, controllers, events, demand, routes).
+        
+        Args:
+            `object_parameters` (str, dict): Either dict containing object parameters or '_.json_'/'_.pkl_' filepath
         """
         
         object_parameters = validate_type(object_parameters, (str, dict), "object_parameters", self.curr_step)
@@ -350,9 +375,10 @@ class Simulation:
     
     def load_demand(self, csv_file: str) -> None:
         """
-        Loads OD demand from a '.csv' file. The file must contain an 'origin/destination' or 'route_id'
-        column(s), 'start_time/end_time' or 'start_step/end_step' columns(s) and a 'demand/number' column.
-        :param csv_file: Demand file location.
+        Loads OD demand from a '_.csv_' file. The file must contain an 'origin/destination' or 'route_id' column(s), 'start_time/end_time' or 'start_step/end_step' columns(s) and a 'demand/number' column.
+        
+        Args:
+            `csv_file` (str): Demand file location
         """
 
         csv_file = validate_type(csv_file, str, "demand file", self.curr_step)
@@ -487,13 +513,17 @@ class Simulation:
     def add_demand(self, routing: str|list|tuple, step_range: list|tuple, demand: int|float, vehicle_types: str|list|tuple|None = None, vehicle_type_dists: list|tuple|None = None, initial_speed: str|int|float = "max", origin_lane: str|int|float = "best", origin_pos: str|int = "base", insertion_sd: float = 1/3):
         """
         Adds traffic flow demand for a specific route and time.
-        :param routing:            Either a route ID or OD pair of edge IDs
-        :param step_range:         (2x1) list or tuple denoting the start and end steps of the demand
-        :param demand:             Generated flow in vehicles/hour
-        :param vehicle_types:      List of vehicle type IDs
-        :param vehicle_type_dists: Vehicle type distributions used when generating flow
-        :param initial_speed:      Initial speed at insertion, either ['max'|'random'] or number > 0
-        :param origin_lane:        Lane for insertion at origin, either ['random'|'free'|'allowed'|'best'|'first'] or lane index
+        
+        Args:
+            `routing` (str, list, tuple): Either a route ID or OD pair of edge IDs
+            `step_range` (str, list, tuple): (2x1) list or tuple denoting the start and end steps of the demand
+            `demand` (int, float): Generated flow in vehicles/hour
+            `vehicle_types` (str, list, tuple, None): List of vehicle type IDs
+            `vehicle_type_dists` (list, tuple, None): Vehicle type distributions used when generating flow
+            `initial_speed` (str, int, float): Initial speed at insertion, either ['_max_'|'_random_'] or number > 0
+            `origin_lane` (str, int): Lane for insertion at origin, either ['_random_'|'_free_'|'_allowed_'|'_best_'|'_first_'] or lane index
+            `origin_pos` (str, int): Longitudinal position at insertion, either ['_random_'|'_free_'|'_random\_free_'|'_base_'|'_last_'|'_stop_'|'_splitFront_'] or offset
+            `insertion_sd` (float): Vehicle insertion number standard deviation, at each step
         """
 
         routing = validate_type(routing, (str, list, tuple), "routing", self.curr_step)
@@ -548,16 +578,19 @@ class Simulation:
 
     def add_demand_function(self, routing: str|list|tuple, step_range: list|tuple, demand_function, parameters: dict|None = None, vehicle_types: str|list|tuple|None = None, vehicle_type_dists: list|tuple|None = None, initial_speed: str|int|float = "max", origin_lane: str|int|float = "best", origin_pos: str|int = "base", insertion_sd: float = 1/3):
         """
-        Adds traffic flow demand calculated for each step using a 'demand_function'.
-        'step' is the only required parameter of the function.
-        :param routing:            Either a route ID or OD pair of edge IDs
-        :param step_range:         (2x1) list or tuple denoting the start and end steps of the demand
-        :param demand_function:    Function used to calculate flow (vehicles/hour)
-        :param parameters:         Dictionary containing extra parameters for the demand function
-        :param vehicle_types:      List of vehicle type IDs
-        :param vehicle_type_dists: Vehicle type distributions used when generating flow
-        :param initial_speed:      Initial speed at insertion, either ['max'|'random'] or number > 0
-        :param origin_lane:        Lane for insertion at origin, either ['random'|'free'|'allowed'|'best'|'first'] or lane index
+        Adds traffic flow demand calculated for each step using a 'demand_function'. 'step' is the only required parameter of the function.
+
+        Args:
+            `routing` (str, list, tuple): Either a route ID or OD pair of edge IDs
+            `step_range` (list, tuple): (2x1) list or tuple denoting the start and end steps of the demand
+            `demand_function` (function): Function used to calculate flow (vehicles/hour)
+            `parameters` (dict, None): Dictionary containing extra parameters for the demand function
+            `vehicle_types` (str, list, tuple, None): List of vehicle type IDs
+            `vehicle_type_dists` (list, tuple, None): Vehicle type distributions used when generating flow
+            `initial_speed` (str, int, float): Initial speed at insertion, either ['_max_'|'_random_'] or number > 0
+            `origin_lane` (str, int, float): Lane for insertion at origin, either ['_random_'|'_free_'|'_allowed_'|'_best_'|'_first_'] or lane index
+            `origin_pos` (str, int): Longitudinal position at insertion, either ['_random_'|'_free_'|'_random\_free_'|'_base_'|'_last_'|'_stop_'|'_splitFront_'] or offset
+            `insertion_sd` (float): Vehicle insertion number standard deviation, at each step
         """
         
         step_range = validate_list_types(step_range, ((int), (int)), True, "step_range", self.curr_step)
@@ -583,9 +616,7 @@ class Simulation:
             self.add_demand(routing, (step_no, step_no), demand_val, vehicle_types, vehicle_type_dists, initial_speed, origin_lane, origin_pos, insertion_sd)
 
     def _add_demand_vehicles(self) -> None:
-        """
-        Implements demand in the demand table.
-        """
+        """ Implements demand in the demand table. """
 
         if self._manual_flow:
             
@@ -636,34 +667,37 @@ class Simulation:
     def get_demand_table(self) -> None:
         """
         Get demand table, if dynamically adding demand.
-        :return (list, list): Demand table headers, demand table value. Returns None if no table.
+        
+        Returns:
+            (list, list): Demand table headers & demand table value. Returns None if no table.
         """
         
         if self._manual_flow:
             return self._demand_headers, self._demand_arrs
         else: return None
 
-    def add_tracked_junctions(self, juncs: str|list|tuple|dict|None = None) -> None:
+    def add_tracked_junctions(self, junctions: str|list|tuple|dict|None = None) -> None:
         """
-        Initalise junctions and start tracking states and flows. Defaults to all
-        junctions with traffic lights.
-        :param juncs: Either junc_id|list of junc_ids, or dict containing juncs parameters
+        Initalise junctions and start tracking states and flows. Defaults to all junctions with traffic lights.
+        
+        Args:
+            `junctions` (str, list, tuple, dict, None): Junction IDs or list of IDs, or dict containing junction(s) parameters
         """
 
         self.track_juncs = True
 
         # If none given, track all junctions with traffic lights
-        if juncs == None: 
+        if junctions == None: 
             track_list, junc_params = self._all_tls, None
         else:
             
-            juncs = validate_type(juncs, (str, list, tuple, dict), "juncs", self.curr_step)
-            if isinstance(juncs, dict):
-                junc_ids, junc_params = list(juncs.keys()), juncs
-            elif isinstance(juncs, (list, tuple)):
-                junc_ids, junc_params = juncs, None
-            elif isinstance(juncs, str):
-                junc_ids, junc_params = [juncs], None
+            junctions = validate_type(junctions, (str, list, tuple, dict), "junctions", self.curr_step)
+            if isinstance(junctions, dict):
+                junc_ids, junc_params = list(junctions.keys()), junctions
+            elif isinstance(junctions, (list, tuple)):
+                junc_ids, junc_params = junctions, None
+            elif isinstance(junctions, str):
+                junc_ids, junc_params = [junctions], None
 
             if len(set(self._all_juncs).intersection(set(junc_ids))) != len(junc_ids):
                 desc = "Junction ID(s) not found ('{0}').".format("', '".join(set(junc_ids) - set(self._all_juncs)))
@@ -681,11 +715,13 @@ class Simulation:
 
     def reset_data(self, reset_juncs: bool = True, reset_edges: bool = True, reset_controllers: bool = True, reset_trips: bool = True) -> None:
         """
-        Resets data collection.
-        :param reset_juncs:       Reset tracked junction data
-        :param reset_edges:       Reset tracked edge data
-        :param reset_controllers: Reset controller data
-        :param reset_trips:       Reset complete/incomplete trip data
+        Resets object/simulation data collection.
+        
+        Args:
+            `reset_juncs` (bool): Reset tracked junction data
+            `reset_edges` (bool): Reset tracked edge data
+            `reset_controllers` (bool): Reset controller data
+            `reset_trips` (bool): Reset complete/incomplete trip data
         """
 
         if reset_juncs:
@@ -709,8 +745,12 @@ class Simulation:
     def is_running(self, close: bool = True) -> bool:
         """
         Returns whether the simulation is running.
-        :param close: If True, end Simulation
-        :return bool: Denotes if the simulation is running
+        
+        Args:
+            `close` (bool): If `True`, end Simulation
+        
+        Returns:
+            bool: Denotes if the simulation is running
         """
 
         if not self._running: return self._running
@@ -728,9 +768,7 @@ class Simulation:
         return True
 
     def end(self) -> None:
-        """
-        Ends the simulation.
-        """
+        """ Ends the simulation. """
 
         try:
             traci.close()
@@ -741,8 +779,11 @@ class Simulation:
     def save_data(self, filename: str|None = None, overwrite: bool = True, json_indent: int|None = 4) -> None:
         """
         Save all vehicle, detector and junction data in a JSON or pickle file.
-        :param filename:  Output filepath (defaults to ./'scenario_name'.json)
-        :param overwrite: Prevent previous outputs being overwritten
+        
+        Args:
+            `filename` (str, None): Output filepath (defaults to '_./{scenario_name}.json_')
+            `overwrite` (bool): Prevent previous outputs being overwritten
+            `json_indent` (int, None): Indent used when saving JSON files
         """
 
         if filename == None:
@@ -778,7 +819,9 @@ class Simulation:
     def add_tracked_edges(self, edge_ids: str|list|None = None):
         """
         Initalise edges and start collecting data.
-        :param edge_ids: List of edge IDs or single ID, defaults to all
+        
+        Args:
+            `edge_ids` (str, list, None): List of edge IDs or single ID, defaults to all
         """
 
         if edge_ids == None: edge_ids = self._all_edges
@@ -797,7 +840,9 @@ class Simulation:
     def add_events(self, event_params: Event|str|list|dict) -> None:
         """
         Add events and event scheduler.
-        :param event_parms: Event parameters [Event|[Event]|dict|filepath]
+        
+        Args:
+            `event_parms` (Event, str, list, dict): Event parameters [Event|[Event]|dict|filepath]
         """
 
         if self._scheduler == None:
@@ -807,7 +852,12 @@ class Simulation:
     def add_controllers(self, controller_params: str|dict) -> dict:
         """
         Add controllers from parameters in a dictionary/JSON file.
-        :param controller_params: Controller parameters dictionary or filepath
+        
+        Args:
+            `controller_params` (str, dict): Controller parameters dictionary or filepath
+
+        Returns:
+            dict: Dictionary of controller objects by their ID
         """
 
         controller_params = load_params(controller_params, "controller_params", self.curr_step)
@@ -841,14 +891,18 @@ class Simulation:
     def step_through(self, n_steps: int|None = None, end_step: int|None = None, n_seconds: int|None = None, vehicle_types: list|tuple|None = None, keep_data: bool = True, append_data: bool = True, pbar_max_steps: int|None = None) -> dict:
         """
         Step through simulation from the current time until end_step, aggregating data during this period.
-        :param n_steps:         Perform n steps of the simulation (defaults to 1)
-        :param end_step:        End point for stepping through simulation (given instead of end_step)
-        :param n_seconds:       Simulation duration in seconds
-        :param vehicle_types:   Vehicle type(s) to collect data of (list of types or string, defaults to all)
-        :param keep_data:       Denotes whether to store and process data collected during this run (defaults to True)
-        :param append_data:     Denotes whether to append simulation data to that of previous runs or overwrite previous data (defaults to True)
-        :param pbar_max_steps:  Max value for progress bar (persistent across calls) (negative values remove the progress bar)
-        :return dict:           All data collected through the time period, separated by detector
+        
+        Args:
+            `n_steps` (int, None): Perform n steps of the simulation (defaults to 1)
+            `end_step` (int, None): End point for stepping through simulation (given instead of `n_steps` or `n_seconds`)
+            `n_seconds` (int, None): Simulation duration in seconds (given instead of `n_steps` or `end_step`)
+            `vehicle_types` (list, tuple, None): Vehicle type(s) to collect data of (type ID or list of IDs, defaults to all)
+            `keep_data` (bool): Denotes whether to store and process data collected during this run (defaults to `True`)
+            `append_data` (bool): Denotes whether to append simulation data to that of previous runs or overwrite previous data (defaults to `True`)
+            `pbar_max_steps` (int, None): Max value for progress bar (persistent across calls) (negative values remove the progress bar)
+        
+        Returns:
+            dict: All data collected through the time period, separated by detector
         """
 
         if not self.is_running(): return
@@ -981,9 +1035,14 @@ class Simulation:
             
     def _step(self, vehicle_types: list|None = None, keep_data: bool = True) -> dict:
         """
-        Increment simulation by one time step, updating light state. step_through is recommended to run the simulation.
-        :param vehicle_types: Vehicle type(s) to collect data of (list of types or string, defaults to all)
-        :return dict:         Simulation data
+        Increment simulation by one time step, updating light state. Use `Simulation.step_through()` to run the simulation.
+        
+        Args:
+            `vehicle_types` (list, None): Vehicle type(s) to collect data of (type ID or list of IDs, defaults to all)
+            `keep_data` (bool): Denotes whether to store and process data collected during this run (defaults to `True`)
+
+        Returns:
+            dict: Simulation data
         """
 
         self.curr_step += 1
@@ -1090,7 +1149,9 @@ class Simulation:
     def get_no_vehicles(self) -> int:
         """
         Returns the number of vehicles in the simulation during the last simulation step.
-        :return int: No. of vehicles
+        
+        Returns:
+            int: No. of vehicles
         """
         
         if self._all_data == None:
@@ -1101,7 +1162,9 @@ class Simulation:
     def get_no_waiting(self) -> float:
         """
         Returns the number of waiting vehicles in the simulation during the last simulation step.
-        :return float: No. of waiting vehicles
+        
+        Returns:
+            float: No. of waiting vehicles
         """
         
         if self._all_data == None:
@@ -1112,7 +1175,9 @@ class Simulation:
     def get_tts(self) -> int:
         """
         Returns the total time spent by vehicles in the simulation during the last simulation step.
-        :return float: TTS
+        
+        Returns:
+            float: Total Time Spent (TTS) in seconds
         """
         
         if self._all_data == None:
@@ -1123,7 +1188,9 @@ class Simulation:
     def get_delay(self) -> int:
         """
         Returns the total delay of vehicles during the last simulation step.
-        :return float: Total delay
+        
+        Returns:
+            float: Total delay in seconds
         """
         
         if self._all_data == None:
@@ -1131,13 +1198,15 @@ class Simulation:
             raise_error(SimulationError, desc, self.curr_step)
         return self._all_data["data"]["vehicles"]["delay"][-1]
     
-    def _add_v_func(self, functions, parameters, func_arr, valid_sim_params) -> None:
+    def _add_v_func(self, functions, parameters: dict, func_arr: list, valid_sim_params: list) -> None:
         """
         Add a vehicle in/out function.
-        :param functions:  Function or list of functions
-        :param parameters: Dictionary containing values for extra custom parameters
-        :param func_arr:   Either list of _v_in_funcs or _v_out_funcs
-        :param valid_sim_params: List of valid simulation parameters
+        
+        Args:
+            `functions` (function, list):  Function or list of functions
+            `parameters` (dict): Dictionary containing values for extra custom parameters
+            `func_arr` (list):   Either list of _v_in_funcs or _v_out_funcs
+            `valid_sim_params` (list): List of valid simulation parameters
         """
 
         if not isinstance(functions, list):
@@ -1164,11 +1233,13 @@ class Simulation:
                 elif parameters != None and function.__name__ in parameters and func_param in parameters[function.__name__]:
                     self._v_func_params[function.__name__][func_param] = parameters[function.__name__][func_param]
 
-    def _remove_v_func(self, functions, v_func_type) -> None:
+    def _remove_v_func(self, functions, v_func_type: str) -> None:
         """
         Remove a vehicle in/out function.
-        :param functions: Function (or function name) or list of functions
-        :param v_func_type: Either 'in' or 'out'
+        
+        Args:
+            `functions` (function, list): Function (or function name) or list of functions
+            `v_func_type` (str): Either 'in' or 'out'
         """
         
         if not isinstance(functions, list): functions = [functions]
@@ -1192,13 +1263,14 @@ class Simulation:
     
     def add_vehicle_in_functions(self, functions, parameters: dict|None = None) -> None:
         """
-        Add a function (or list of functions) that will are called with each
-        new vehicle that enters the simulation. Valid TUD-SUMO parameters are 'simulation',
-        'curr_step', 'vehicle_id', 'route_id', 'vehicle_type', 'departure', 'origin',
-        'destination'. These values are collected from the simulation with each call. Extra
+        Add a function (or list of functions) that will are called with each new vehicle that enters the simulation.
+        Valid TUD-SUMO parameters are '_simulation_', '_curr_step_', '_vehicle_id_', '_route_id_', '_vehicle_type_',
+        '_departure_', '_origin_', '_destination_'. These values are collected from the simulation with each call. Extra
         parameters for any function can be given in the parameters dictionary.
-        :param functions:  Function or list of functions
-        :param parameters: Dictionary containing values for extra custom parameters
+        
+        Args:
+            `functions` (function, list): Function or list of functions
+            `parameters` (dict): Dictionary containing values for extra custom parameters
         """
 
         self._add_v_func(functions, parameters, self._v_in_funcs, self._valid_v_func_params)
@@ -1206,19 +1278,22 @@ class Simulation:
     def remove_vehicle_in_functions(self, functions) -> None:
         """
         Stop a function called with each new vehicle that enters the simulation.
-        :param functions: Function (or function name) or list of functions
+        
+        Args:
+            functions (function, list): Function (or function name) or list of functions
         """
         
         self._remove_v_func(functions, "in")
 
     def add_vehicle_out_functions(self, functions, parameters: dict|None = None) -> None:
         """
-        Add a function (or list of functions) that will are called with each
-        vehicle that exits the simulation. Valid TUD-SUMO parameters are 'simulation',
-        'curr_step' and 'vehicle_id'. These values are collected from the simulation with 
-        each call. Extra parameters for any function can be given in the parameters dictionary.
-        :param functions: Function or list of functions
-        :param parameters: Dictionary containing values for extra custom parameters
+        Add a function (or list of functions) that will are called with each vehicle that exits the simulation.
+        Valid TUD-SUMO parameters are '_simulation_', '_curr_step_' and '_vehicle_id_'. These values are collected
+        from the simulation with each call. Extra parameters for any function can be given in the parameters dictionary.
+        
+        Args:
+            `functions` (function, list): Function or list of functions
+            `parameters` (dict, None): Dictionary containing values for extra custom parameters
         """
 
         self._add_v_func(functions, parameters, self._v_out_funcs, self._valid_v_func_params[:3])
@@ -1226,7 +1301,9 @@ class Simulation:
     def remove_vehicle_out_functions(self, functions) -> None:
         """
         Stop a function called with each vehicle that exits the simulation.
-        :param functions: Function (or function name) or list of functions
+        
+        Args:
+            `functions` (function, list): Function (or function name) or list of functions
         """
         
         self._remove_v_func(functions, "out")
@@ -1234,7 +1311,9 @@ class Simulation:
     def update_vehicle_function_parameters(self, parameters: dict) -> None:
         """
         Update parameters for previously added vehicle in/out functions.
-        :param parameters: Dictionary containing new parameters for vehicle in/out functions.
+        
+        Args:
+            `parameters` (dict): Dictionary containing new parameters for vehicle in/out functions.
         """
         
         validate_type(parameters, dict, "parameters", self.curr_step)
@@ -1254,6 +1333,13 @@ class Simulation:
                 raise_error(KeyError, desc, self.curr_step)
 
     def _vehicles_in(self, vehicle_ids: str|list|tuple, is_added: bool = False) -> None:
+        """
+        Updates simulation with each new vehicle.
+
+        Args:
+            `vehicle_ids` (str, list, tuple): Vehicle ID or list of IDs
+            `is_added` (bool): Denotes whether the vehicle(s) has been manually added
+        """
 
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
         elif isinstance(vehicle_ids, set): vehicle_ids = list(vehicle_ids)
@@ -1286,6 +1372,13 @@ class Simulation:
                 func(**param_dict)
             
     def _vehicles_out(self, vehicle_ids: str|list|tuple, is_removed: bool = False) -> None:
+        """
+        Updates simulation with each leaving vehicle.
+
+        Args:
+            `vehicle_ids` (str, list, tuple): Vehicle IDs or list of IDs
+            `is_removed` (bool): Denotes whether the vehicle(s) has been manually removed
+        """
 
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
         elif isinstance(vehicle_ids, set): vehicle_ids = list(vehicle_ids)
@@ -1339,10 +1432,14 @@ class Simulation:
     def get_last_step_detector_vehicles(self, detector_ids: str|list|tuple, vehicle_types: list|None = None, flatten: bool = False) -> dict|list:
         """
         Get the IDs of vehicles that passed over the specified detectors.
-        :param detector_ids:  Detector ID or list of IDs (defaults to all)
-        :param vehicle_types: Included vehicle types
-        :param flatten:       If true, all IDs are returned in a 1D array, else a dict with vehicles for each detector
-        :return dict|list:    Dict or list containing all vehicle IDs
+        
+        Args:
+            `detector_ids` (str, list, tuple): Detector ID or list of IDs (defaults to all)
+            `vehicle_types` (list, None): Included vehicle types
+            `flatten` (bool): If true, all IDs are returned in a 1D array, else a dict with vehicles for each detector
+        
+        Returns:
+            (dict, list): Dict or list containing all vehicle IDs
         """
 
         detector_ids = [detector_ids] if not isinstance(detector_ids, (list, tuple)) else detector_ids
@@ -1370,10 +1467,16 @@ class Simulation:
     
     def get_detector_vals(self, detector_ids: list|tuple|str, data_keys: str|list) -> int|float|dict:
         """
-        Get data values from a specific detector using a list of data keys.
-        :param detector_ids: Detector ID or list of IDs
-        :param data_keys:    List of keys from [type|position|vehicle_count|vehicle_ids|lsm_speed|halting_no (MEE only)|lsm_occupancy (IL only)|last_detection (IL only)|avg_vehicle_length (IL only)], or single key
-        :return dict:        Values by data_key (or single value)
+        Get data values from a specific detector (_Multi-Entry-Exit (MEE)_ or _Induction Loop (IL)_) using a list
+        of data keys. Valid data keys are; '_type_', '_position_', '_vehicle_count_', '_vehicle_ids_', '_lsm_speed_',
+        '_halting_no (MEE only)_', '_lsm_occupancy (IL only)_', '_last_detection (IL only)_', '_avg_vehicle_length_' (IL only).
+
+        Args:
+            `detector_ids` (list, tuple, str): Detector ID or list of IDs
+            `data_keys` (str, list): Data key or list of keys
+        
+        Returns:
+            (dict, str, list, int, float): Values by `data_key` (or single value)
         """
 
         all_data_vals = {}
@@ -1466,17 +1569,22 @@ class Simulation:
         
         return all_data_vals
     
-    def get_interval_detector_data(self, detector_ids: int|str, data_keys: str|list, n_steps: int, interval_end: int = 0, avg_step_vals: bool = True, avg_det_vals: bool = True, sum_counts: bool = True) -> float|list|dict:
+    def get_interval_detector_data(self, detector_ids: str|list|tuple, data_keys: str|list, n_steps: int, interval_end: int = 0, avg_step_vals: bool = True, avg_det_vals: bool = True, sum_counts: bool = True) -> float|list|dict:
         """
-        Get data previously collected by a detector over range (curr step - n_step - interval_end -> curr_step - interval_end).
-        :param detector_ids:  Detector ID or list of IDs
-        :param data_keys:     List of keys from ['flow'|'density'|'speeds'|'no_vehicles'|'no_unique_vehicles'|'occupancies' (induction loop only)], or single key
-        :param n_steps:       Interval length in steps (max at number of steps the simulation has run)
-        :param interval_end:  Steps since end of interval (0 = current step)
-        :param avg_step_vals: Bool denoting whether to return an average value across the interval ('flow' or 'density' always returns average value for interval)
-        :param avg_det_vals:  Bool denoting whether to return values averaged for all detectors
-        :param sum_counts:    Bool denoting whether to return total count values ('no_vehicles' or 'no_unique_vehicles', overrides avg_step_vals)
-        :return float|dict:   Either single value or dict containing values by data_key
+        Get data previously collected by a detector over range (`curr step - n_step - interval_end -> curr_step - interval_end`).
+        Valid data keys are; '_flow_', '_density_', '_speeds_', '_no_vehicles_', '_no_unique_vehicles_', '_occupancies_' (induction loop only).
+        
+        Args:
+            `detector_ids` (str, list, tuple):  Detector ID or list of IDs
+            `data_keys` (str, list): Data key or list of keys
+            `n_steps` (int): Interval length in steps (max at number of steps the simulation has run)
+            `interval_end` (int): Steps since end of interval (`0 = current step`)
+            `avg_step_vals` (bool): Bool denoting whether to return an average value across the interval ('_flow_' or '_density_' always returns average value for interval)
+            `avg_det_vals` (bool): Bool denoting whether to return values averaged for all detectors
+            `sum_counts` (bool): Bool denoting whether to return total count values ('_no_vehicles_' or '_no_unique_vehicles_', overrides `avg_step_vals`)
+        
+        Returns:
+            (int, float, dict): Either single value or dict containing values by `data_key` and/or detectors
         """
 
         if self._all_data == None:
@@ -1610,9 +1718,11 @@ class Simulation:
     def set_phases(self, junction_phases: dict, start_phase: int = 0, overwrite: bool = True) -> None:
         """
         Sets the phases for the simulation, starting at the next simulation step.
-        :param junction_phases: Dictionary containing junction phases and times
-        :param start_phase:     Phase number to start at, defaults to 0
-        :param overwrite:       If true, the junc_phases dict is overwitten with junction_phases. If false, only specific junctions are overwritten.
+        
+        Args:
+            `junction_phases` (dict): Dictionary containing junction phases and times
+            `start_phase` (int): Phase number to start at, defaults to 0
+            `overwrite` (bool): If `True`, the `junc_phases` dict is overwitten with `junction_phases`. If `False`, only specific junctions are overwritten.
         """
 
         # If overwriting, the junc phases dictionary is replaced with
@@ -1660,9 +1770,11 @@ class Simulation:
     def set_m_phases(self, junction_phases: dict, start_phase: int = 0, overwrite: bool = True) -> None:
         """
         Sets the traffic light phases for the simulation based on movements, starting at the next simulation step.
-        :param junction_phases: Dictionary containing junction phases, times and masks for different movements
-        :param start_phase:     Phase number to start at, defaults to 0
-        :param overwrite:       If true, the junc_phases dict is overwitten with junction_phases. If false, only specific junctions are overwritten.
+        
+        Args:
+            `junction_phases` (dict): Dictionary containing junction phases, times and masks for different movements
+            `start_phase` (int): Phase number to start at, defaults to 0
+            `overwrite` (bool): If `True`, the `junc_phases` dict is overwitten with `junction_phases`. If `False`, only specific junctions are overwritten.
         """
 
         new_phase_dict = {}
@@ -1757,9 +1869,11 @@ class Simulation:
 
     def set_tl_colour(self, junction_id: str|int, colour_str: str) -> None:
         """
-        Sets a junction to a set colour/phase string for an indefinite amount of time. Can be used when tracking phases separately.
-        :param junction_id: Junction ID
-        :param colour_str:  Colour character ([r|y|g|-]) or phase string ([r|y|g|-]+)
+        Sets a junction to a colour for an indefinite amount of time. Can be used when tracking phases separately (ie. not within TUD-SUMO).
+        
+        Args:
+            `junction_id` (str, int): Junction ID
+            `colour_str` (str): Phase colour string (valid characters are ['_G_'|'_g_'|'_y_'|'_r_'|'-'])
         """
         
         if junction_id not in list(traci.trafficlight.getIDList()):
@@ -1784,19 +1898,23 @@ class Simulation:
         
         self.set_phases(junc_phases, overwrite=False)
 
-    def set_tl_metering_rate(self, rm_id: str|int, metering_rate: int|float, g_time: int|float = 1, y_time: int|float = 1, min_red: int|float = 1, vehs_per_cycle: int|None = None, control_interval: int = 60) -> dict:
+    def set_tl_metering_rate(self, rm_id: str, metering_rate: int|float, g_time: int|float = 1, y_time: int|float = 1, min_red: int|float = 1, vehs_per_cycle: int|None = None, control_interval: int|float = 60) -> dict:
         """
         Set ramp metering rate of a meter at a junction. Uses a one-car-per-green policy with a default
         1s green and yellow time, with red phase duration changed to set flow. All phase durations must
         be larger than the simulation step length.
-        :param rm_id:            Ramp meter (junction) ID
-        :param metering_rate:    On-ramp inflow in veh/hr (from all lanes)
-        :param g_time:           Green phase duration (s), defaults to 1
-        :param y_time:           Yellow phase duration (s), defaults to 1
-        :param min_red:          Minimum red phase duration (s), defaults to 1
-        :param vehs_per_cycle:   Number of vehicles released with each cycle, defaults to the number of lanes
-        :param control_interval: Ramp meter control interval (s)
-        :return dict:            Resulting phase dictionary
+        
+        Args:
+            `rm_id` (str): Ramp meter (junction) ID
+            `metering_rate` (int, float): On-ramp inflow in veh/hr (from all lanes)
+            `g_time` (int, float): Green phase duration (s), defaults to 1
+            `y_time` (int, float): Yellow phase duration (s), defaults to 1
+            `min_red` (int, float): Minimum red phase duration (s), defaults to 1
+            `vehs_per_cycle` (int, None): Number of vehicles released with each cycle, defaults to the number of lanes
+            `control_interval` (int, float): Ramp meter control interval (s)
+        
+        Returns:
+            dict: Resulting phase dictionary
         """
         
         if min([g_time, y_time, min_red]) <= self.step_length:
@@ -1857,27 +1975,31 @@ class Simulation:
         self.set_phases({rm_id: phases_dict}, overwrite=False)
         return phases_dict
 
-    def change_phase(self, junction_id: str|int, phase_no: int) -> None:
+    def change_phase(self, junction_id: str|int, phase_number: int) -> None:
         """
         Change to a different phase at the specified junction_id.
-        :param junction_id: Junction ID
-        :param phase_no:    Phase number
+        
+        Args:
+            `junction_id` (str, int): Junction ID
+            `phase_number` (int): Phase number
         """
         
-        if 0 < phase_no < len(self._junc_phases[junction_id]["phases"]):
-            self._junc_phases[junction_id]["curr_phase"] = phase_no
-            self._junc_phases[junction_id]["curr_time"] = sum(self.junc_phase["times"][:phase_no])
+        if 0 < phase_number < len(self._junc_phases[junction_id]["phases"]):
+            self._junc_phases[junction_id]["curr_phase"] = phase_number
+            self._junc_phases[junction_id]["curr_time"] = sum(self.junc_phase["times"][:phase_number])
 
             self._update_lights(junction_id)
 
         else:
-            desc = "Invalid phase number '{0}' (must be [0-{1}]).".format(phase_no, len(self._junc_phases[junction_id]["phases"]))
+            desc = "Invalid phase number '{0}' (must be [0-{1}]).".format(phase_number, len(self._junc_phases[junction_id]["phases"]))
             raise_error(ValueError, desc, self.curr_step)
 
     def _update_lights(self, junction_ids: list|str|None = None) -> None:
         """
         Update light settings for given junctions.
-        :param junction_ids: Junction ID, or list of IDs (defaults to all)
+        
+        Args:
+            `junction_ids` (list, str, None): Junction ID, or list of IDs (defaults to all)
         """
 
         if junction_ids is None: junction_ids = self._junc_phases.keys()
@@ -1892,14 +2014,17 @@ class Simulation:
                 new_phase = "".join([new_phase[i] if new_phase[i] != '-' else curr_setting[i] for i in range(len(new_phase))])
             traci.trafficlight.setRedYellowGreenState(junction_id, new_phase)
 
-    def add_vehicle(self, vehicle_id: str, vehicle_type: str, routing: str|list|tuple, initial_speed: str|float="max", origin_lane: str|int="best", origin_pos: str|int = "base") -> None:
+    def add_vehicle(self, vehicle_id: str, vehicle_type: str, routing: str|list|tuple, initial_speed: str|int|float="max", origin_lane: str|int="best", origin_pos: str|int|float = "base") -> None:
         """
         Add a new vehicle into the simulation.
-        :param vehicle_id:    ID for new vehicle, must be unique
-        :param vehicle_type:  Vehicle type ID for new vehicle
-        :param routing:       Either route ID or (2x1) list of edge IDs for origin-destination pair
-        :param initial_speed: Initial speed at insertion, either ['max'|'random'] or number > 0
-        :param origin_lane:   Lane for insertion at origin, either ['random'|'free'|'allowed'|'best'|'first'] or lane index
+        
+        Args:
+            `vehicle_id` (str): ID for new vehicle, **must be unique**
+            `vehicle_type` (str): Vehicle type ID for new vehicle
+            `routing` (str, list, tuple): Either route ID or (2x1) list of edge IDs for origin-destination pair
+            `initial_speed` (str, int, float): Initial speed at insertion, either ['_max_'|'_random_'] or number > 0
+            `origin_lane` (str, int, float): Lane for insertion at origin, either ['_random_'|'_free_'|'_allowed_'|'_best_'|'_first_'] or lane index
+            `origin_pos` (str, int): Longitudinal position at insertion, either ['_random_'|'_free_'|'_random\_free_'|'_base_'|'_last_'|'_stop_'|'_splitFront_'] or offset
         """
 
         if self.vehicle_exists(vehicle_id):
@@ -1909,7 +2034,7 @@ class Simulation:
         origin_lane = validate_type(origin_lane, (str, int), "origin_lane", self.curr_step)
         initial_speed = validate_type(initial_speed, (str, int, float), "initial_speed", self.curr_step)
         if isinstance(initial_speed, str) and initial_speed not in ["max", "random"]:
-            desc = "Invalid initial_speed string given '{0}' (must be ['max'|'random']).".format(initial_speed, type(initial_speed).__name__)
+            desc = "Invalid initial_speed string given '{0}' (must be ['_max_'|'_random_']).".format(initial_speed, type(initial_speed).__name__)
             raise_error(TypeError, desc, self.curr_step)
         elif isinstance(initial_speed, (int, float)) and initial_speed < 0:
             desc = "Invalid initial_speed value given '{0}' (must be > 0).".format(initial_speed, type(initial_speed).__name__)
@@ -1970,7 +2095,9 @@ class Simulation:
     def remove_vehicles(self, vehicle_ids: str|list|tuple) -> None:
         """
         Remove a vehicle or list of vehicles from the simulation.
-        :param vehicle_ids: List of vehicle IDs or single ID
+        
+        Args:
+            `vehicle_ids` (str, list, tuple): List of vehicle IDs or single ID
         """
         
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
@@ -1984,21 +2111,26 @@ class Simulation:
                 desc = "Unrecognised vehicle ID given ('{0}').".format(vehicle_id)
                 raise_error(KeyError, desc, self.curr_step)
 
-    def cause_incident(self, duration: int, vehicle_ids: str|list|tuple=None, geometry_ids: str|list|tuple=None, n_vehicles: int=1, vehicle_separation=0, assert_n_vehicles: bool=False, edge_speed: int|float|None=-1, highlight_vehicles: bool=True, incident_id: str=None) -> bool:
+    def cause_incident(self, duration: int, vehicle_ids: str|list|tuple|None=None, geometry_ids: str|list|tuple=None, n_vehicles: int=1, vehicle_separation: float=0, assert_n_vehicles: bool=False, edge_speed: int|float|None=-1, highlight_vehicles: bool=True, incident_id: str|None=None) -> bool:
         """
         Simulates an incident by stopping vehicles on the road for a period of time, before removing
-        them from the simulation. Vehicle(s) can either be specified using vehicle_ids, chosen
-        randomly based location using geometry_ids, or vehicles can be chosen randomly throughout
-        the network if neither vehicle_ids or geometry_ids are given.
-        :param duration: Duration of incident (in simulation steps)
-        :param vehicle_ids: Vehicle ID or list of IDs to include in the incident
-        :param geometry_ids: Geometry ID or list of IDs to randomly select vehicles from
-        :param n_vehicles: Number of vehicles in the incident, if randomly chosen
-        :param vehicle_separation: Factor denoting how separated randomly chosen vehicles are (0.1-1)
-        :param assert_n_vehicles: Denotes whether to throw an error if the correct number of vehicles cannot be found
-        :param edge_speed: New max speed for edges where incident vehicles are located (defaults to 15km/h or 10mph)
-        :param highlight_vehicles: Denotes whether to highlight vehicles in the SUMO GUI
-        :param incident_id: Incident event ID used in the simulation data file
+        them from the simulation. Vehicle(s) can either be specified using `vehicle_ids`, chosen
+        randomly based location using `geometry_ids`, or vehicles can be chosen randomly throughout
+        the network if neither `vehicle_ids` or `geometry_ids` are given.
+        
+        Args:
+            `duration` (int): Duration of incident (in simulation steps)
+            `vehicle_ids` (str, list, tuple, None): Vehicle ID or list of IDs to include in the incident
+            `geometry_ids` (str, list, tuple, None): Geometry ID or list of IDs to randomly select vehicles from
+            `n_vehicles` (int): Number of vehicles in the incident, if randomly chosen
+            `vehicle_separation` (float): Factor denoting how separated randomly chosen vehicles are (0.1-1)
+            `assert_n_vehicles` (bool): Denotes whether to throw an error if the correct number of vehicles cannot be found
+            `edge_speed` (int, float, None): New max speed for edges where incident vehicles are located (defaults to 15km/h or 10mph)
+            `highlight_vehicles` (bool): Denotes whether to highlight vehicles in the SUMO GUI
+            `incident_id` (str, None): Incident event ID used in the simulation data file (defaults to '_incident\_{n}_')
+
+        Returns:
+            bool: Denotes whether incident was successfully created
         """
         
         if self._scheduler == None:
@@ -2110,7 +2242,9 @@ class Simulation:
     def vehicle_exists(self, vehicle_id: str) -> bool:
         """
         Tests if a vehicle exists in the network and has departed.
-        :return bool: True if ID in list of current vehicle IDs 
+        
+        Returns:
+            bool: `True` if ID in list of current vehicle IDs 
         """
 
         vehicle_id = validate_type(vehicle_id, str, "vehicle_id", self.curr_step)
@@ -2120,7 +2254,9 @@ class Simulation:
     def junction_exists(self, junction_id: str) -> bool:
         """
         Tests if a junction exists in the network.
-        :return bool: True if ID in list of all junction IDs 
+        
+        Returns:
+            bool: `True` if ID in list of all junction IDs 
         """
 
         junction_id = validate_type(junction_id, str, "junction_id", self.curr_step)
@@ -2130,7 +2266,9 @@ class Simulation:
     def tracked_junction_exists(self, junction_id: str) -> bool:
         """
         Tests if a tracked junction exists in the network.
-        :return bool: True if ID in list of tracked junction IDs
+        
+        Returns:
+            bool: `True` if ID in list of tracked junction IDs
         """
 
         junction_id = validate_type(junction_id, str, "junction_id", self.curr_step)
@@ -2140,7 +2278,9 @@ class Simulation:
     def tracked_edge_exists(self, edge_id: str) -> bool:
         """
         Tests if a tracked junction exists in the network.
-        :return bool: True if ID in list of tracked junction IDs
+        
+        Returns:
+            bool: `True` if ID in list of tracked junction IDs
         """
 
         edge_id = validate_type(edge_id, str, "edge_id", self.curr_step)
@@ -2150,7 +2290,9 @@ class Simulation:
     def vehicle_loaded(self, vehicle_id: str) -> bool:
         """
         Tests if a vehicle is loaded (may not have departed).
-        :return bool: True if ID in list of loaded vehicle IDs
+        
+        Returns:
+            bool: `True` if ID in list of loaded vehicle IDs
         """
 
         vehicle_id = validate_type(vehicle_id, str, "vehicle_id", self.curr_step)
@@ -2160,7 +2302,9 @@ class Simulation:
     def vehicle_to_depart(self, vehicle_id: str) -> bool:
         """
         Tests if a vehicle is loaded but has not departed yet.
-        :return bool: True if vehicle has not departed yet
+        
+        Returns:
+            bool: `True` if vehicle has not departed yet
         """
 
         vehicle_id = validate_type(vehicle_id, str, "vehicle_id", self.curr_step)
@@ -2173,9 +2317,13 @@ class Simulation:
     
     def add_vehicle_subscriptions(self, vehicle_ids: str|list|tuple, data_keys: str|list|tuple) -> None:
         """
-        Creates a new subscription for vehicle variables.
-        :param vehicle_ids: List of vehicle IDs or single ID
-        :param data_keys:   List of data_keys or single key, from [speed|is_stopped|max_speed|acceleration|position|altitude|heading|edge_id|lane_idx|route_id|route_idx|route_edges]
+        Creates a new subscription for certain variables for **specific vehicles**. Valid data keys are;
+        '_speed_', '_is_stopped_', '_max_speed_', '_acceleration_', '_position_', '_altitude_', '_heading_',
+        '_edge_id_', '_lane_idx_', '_route_id_', '_route_idx_', '_route_edges_'.
+
+        Args:
+            `vehicle_ids` (str, list, tuple): Vehicle ID or list of IDs
+            `data_keys` (str, list, tuple): Data key or list of keys
         """
 
         if isinstance(data_keys, str): data_keys = [data_keys]
@@ -2201,8 +2349,10 @@ class Simulation:
 
     def remove_vehicle_subscriptions(self, vehicle_ids: str|list|tuple) -> None:
         """
-        Remove all active subscriptions for a vehicle or list of vehicles.
-        :param vehicle_ids: List of vehicle IDs or single ID
+        Remove **all** active subscriptions for a vehicle or list of vehicles.
+        
+        Args:
+            `vehicle_ids` (str, list, tuple): Vehicle ID or list of IDs
         """
 
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
@@ -2215,11 +2365,14 @@ class Simulation:
                 desc = "Unrecognised vehicle ID given ('{0}').".format(vehicle_id)
                 raise_error(KeyError, desc, self.curr_step)
     
-    def add_detector_subscriptions(self, detector_ids: str, data_keys: str|list) -> None:
+    def add_detector_subscriptions(self, detector_ids: str|list|tuple, data_keys: str|list|tuple) -> None:
         """
-        Creates a new subscription for detector variables.
-        :param detector_id: List of detector IDs or single ID
-        :param data_keys:   List of data_keys or single key, from [vehicle_count|vehicle_ids|speed|halting_no|occupancy|last_detection]
+        Creates a new subscription for certain variables for **specific detectors**. Valid data keys are;
+        '_vehicle_count_', '_vehicle_ids_', '_speed_', '_halting_no_', '_occupancy_', '_last_detection_'.
+        
+        Args:
+            `detector_id` (str, list, tuple): Detector ID or list of IDs
+            `data_keys` (str, list, tuple): Data key or list of keys
         """
 
         if isinstance(data_keys, str): data_keys = [data_keys]
@@ -2252,8 +2405,10 @@ class Simulation:
 
     def remove_detector_subscriptions(self, detector_ids: str|list|tuple) -> None:
         """
-        Remove all active subscriptions for a detector or list of detectors.
-        :param detector_ids: List of detector IDs or single ID
+        Remove **all** active subscriptions for a detector or list of detectors.
+        
+        Args:
+            `detector_ids` (str, list, tuple): Detector ID or list of IDs
         """
 
         if isinstance(detector_ids, str): detector_ids = [detector_ids]
@@ -2275,11 +2430,14 @@ class Simulation:
 
                 d_class.unsubscribe(detector_id)
     
-    def add_geometry_subscriptions(self, geometry_ids: str, data_keys: str|list) -> None:
+    def add_geometry_subscriptions(self, geometry_ids: str|list|tuple, data_keys: str|list|tuple) -> None:
         """
-        Creates a new subscription for geometry (edge/lane) variables.
-        :param geometry_ids: List of geometry IDs or single ID
-        :param data_keys:    List of data_keys or single key, from [vehicle_count|vehicle_ids|vehicle_speed|halting_no|occupancy]
+        Creates a new subscription for geometry (edge/lane) variables. Valid data keys are;
+        '_vehicle_count_', '_vehicle_ids_', '_vehicle_speed_', '_halting_no_', '_occupancy_'.
+        
+        Args:
+            `geometry_ids` (str, list, tuple): Geometry ID or list of IDs
+            `data_keys` (str, list, tuple): Data key or list of keys
         """
 
         if isinstance(data_keys, str): data_keys = [data_keys]
@@ -2306,8 +2464,10 @@ class Simulation:
 
     def remove_geometry_subscriptions(self, geometry_ids: str|list|tuple) -> None:
         """
-        Remove all active subscriptions for a geometry object or list of geometry objects.
-        :param geometry_ids: List of geometry IDs or single ID
+        Remove **all** active subscriptions for a geometry object or list of geometry objects.
+        
+        Args:
+            `geometry_ids` (str, list, tuple): Geometry ID or list of IDs
         """
 
         if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
@@ -2326,18 +2486,20 @@ class Simulation:
     def set_vehicle_vals(self, vehicle_ids: list|tuple|str, **kwargs) -> None:
         """
         Calls the TraCI API to change a vehicle's state.
-        :param vehicle_ids:  Vehicle ID or list of IDs
-        :param colour:       Sets vehicle colour [str|(int)]
-        :param highlight:    Highlights the vehicle with a circle (bool)
-        :param speed:        Set new speed value [int|float]
-        :param max_speed:    Set new max speed value [int|float]
-        :param acceleration: Set acceleration for a given duration ([int|float], [int|float])
-        :param lane_idx:     Try and change lane for a given duration (int, [int|float])
-        :param destination:  Set vehicle destination edge ID [str]
-        :param route_id:     Set vehicle route by route ID or list of edges (str)
-        :param route_edges:  Set vehicle route by list of edges ([str])
-        :param speed_safety_checks: (Indefinitely) set whether speed/acceleration safety constraints are followed when setting speed (bool)
-        :param lc_safety_checks: (Indefinitely) set whether lane changing safety constraints are followed when changing lane (bool)
+        
+        Args:
+            `vehicle_ids` (list, tuple, str): Vehicle ID or list of IDs
+            `colour` (str, (int)): Sets vehicle colour
+            `highlight` (bool): Highlights the vehicle with a circle (bool)
+            `speed` (int, float): Set new speed value
+            `max_speed` (int, float): Set new max speed value
+            `acceleration` ((int, float), (int, float)): Set acceleration for a given duration 
+            `lane_idx` (int, (int, float)): Try and change lane for a given duration
+            `destination` (str): Set vehicle destination edge ID
+            `route_id` (str): Set vehicle route by route ID or list of edges
+            `route_edges` (list): Set vehicle route by list of edges
+            `speed_safety_checks` (bool): (**Indefinitely**) set whether speed/acceleration safety constraints are followed when setting speed
+            `lc_safety_checks` (bool): (**Indefinitely**) set whether lane changing safety constraints are followed when changing lane
         """
 
         if isinstance(vehicle_ids, str): vehicle_ids = [vehicle_ids]
@@ -2482,7 +2644,12 @@ class Simulation:
     def get_vehicle_ids(self, vehicle_types: str|list|tuple|None = None) -> list:
         """
         Return list of IDs for all vehicles currently in the simulation.
-        :return list: All current vehicle IDs
+        
+        Args:
+            `vehicle_types` (str, list, tuple, None): Vehicle type ID or list of IDs (defaults to all)
+
+        Returns:
+            list: All current vehicle IDs
         """
 
         if vehicle_types == None:
@@ -2505,7 +2672,9 @@ class Simulation:
     def get_junction_ids(self) -> list:
         """
         Return list of all junctions in the network.
-        :return list: All junction IDs
+        
+        Returns:
+            list: All junction IDs
         """
 
         return list(self._all_juncs)
@@ -2513,7 +2682,9 @@ class Simulation:
     def get_tracked_junction_ids(self) -> list:
         """
         Return list of all tracked junctions in the network.
-        :return list: All tracked junction IDs
+        
+        Returns:
+            list: All tracked junction IDs
         """
 
         return list(self.tracked_junctions.keys())
@@ -2521,7 +2692,9 @@ class Simulation:
     def get_tracked_edge_ids(self) -> list:
         """
         Return list of all tracked edges in the network.
-        :return list: All tracked edges IDs
+        
+        Returns:
+            list: All tracked edges IDs
         """
 
         return list(self.tracked_edges.keys())
@@ -2529,7 +2702,9 @@ class Simulation:
     def get_vehicle_types(self) -> list:
         """
         Return list of all valid vehicle type IDs.
-        :return list: All vehicle type IDs
+        
+        Returns:
+            list: All vehicle type IDs
         """
 
         return list(self._all_vehicle_types)
@@ -2537,8 +2712,12 @@ class Simulation:
     def get_geometry_ids(self, geometry_types: str|list|tuple|None = None) -> list:
         """
         Return list of IDs for all edges and lanes in the network.
-        :param geometry_types: Geometry type ['edge'|'lane'] or list of types
-        :return list:          All geometry types (of type)
+        
+        Args:
+            `geometry_types` (str, list, tuple, None): Geometry type ['_edge_'|'_lane_'] or list of types
+        
+        Returns:
+            list: All geometry types (of type)
         """
 
         valid_types = ["edge", "lane"]
@@ -2563,8 +2742,12 @@ class Simulation:
     def get_detector_ids(self, detector_types: str|list|tuple|None = None) -> list:
         """
         Return list of IDs for all edges and lanes in the network.
-        :param detector_types: Detector type ['multientryexit'|'inductionloop'] or list of types
-        :return list:          All detector IDs (of type)
+        
+        Args:
+            `detector_types` (str, list, tuple, None): Detector type ['_multientryexit_'|'_inductionloop_'] or list of types
+        
+        Returns:
+            list: All detector IDs (of type)
         """
 
         valid_types = ["multientryexit", "inductionloop"]
@@ -2586,10 +2769,14 @@ class Simulation:
     def get_path_edges(self, origin: str, destination: str, curr_optimal: bool = True) -> list|None:
         """
         Find an optimal route between 2 edges (using the A* algorithm).
-        :param origin:                Origin edge ID
-        :param destination:           Destination edge ID
-        :param curr_optimal:          Denotes whether to find current optimal route (ie. whether to consider current conditions)
-        :return [None|(list, float)]: Returns list of edge IDs & travel time (s) (based on curr_optimal), or None if no route exists
+        
+        Args:
+            `origin` (str): Origin edge ID
+            `destination` (str): Destination edge ID
+            `curr_optimal` (str): Denotes whether to find current optimal route (ie. whether to consider current conditions)
+        
+        Returns:
+            (None, (list, float)): List of edge IDs & travel time (s) (based on curr_optimal), or None if no route exists
         """
         origin = validate_type(origin, str, "origin", self.curr_step)
         destination = validate_type(destination, str, "destination", self.curr_step)
@@ -2658,10 +2845,14 @@ class Simulation:
     def get_path_travel_time(self, edge_ids: list|tuple, curr_tt: bool = True, unit: str = "seconds") -> float:
         """
         Calculates the travel time for a route.
-        :param edge_ids: List of edge IDs
-        :param curr_tt:  Denotes whether to find the current travel time (ie. whether to consider current conditions)
-        :param unit:     Time unit (either ['steps'|'seconds'|'minutes'|'hours'])
-        :return float:   Travel time
+        
+        Args:
+            `edge_ids` (list, tuple): List of edge IDs
+            `curr_tt` (bool): Denotes whether to find the current travel time (ie. whether to consider current conditions)
+            `unit` (str): Time unit (either ['_steps_'|'_seconds_'|'_minutes_'|'_hours_']) (defaults to seconds)
+        
+        Returns:
+            float: Travel time in specified unit
         """
         
         edge_ids = validate_list_types(edge_ids, str, param_name="edge_ids", curr_sim_step=self.curr_step)
@@ -2675,8 +2866,12 @@ class Simulation:
         """
         Checks whether a list of edges is a valid connected path. If two disconnected
         edges are given, it returns whether there is a path between them.
-        :param edge_ids: List of edge IDs
-        :return bool:    Denotes whether it is a valid path
+        
+        Args:
+            `edge_ids` (list, tuple): List of edge IDs
+        
+        Returns:
+            bool: Denotes whether it is a valid path
         """
 
         edge_ids = validate_list_types(edge_ids, str, param_name="edge_ids", curr_sim_step=self.curr_step)
@@ -2708,9 +2903,11 @@ class Simulation:
         """
         Add a new route. If only 2 edge IDs are given, vehicles calculate
         optimal route at insertion, otherwise vehicles take specific edges.
-        :param routing: List of edge IDs
-        :param route_id: Route ID, if not given, generated from origin-destination
-        :param assert_new_id: If True, an error is thrown for duplicate route IDs
+        
+        Args:
+            `routing` (list, tuple): List of edge IDs
+            `route_id` (str, None): Route ID, if not given, generated from origin-destination
+            `assert_new_id` (bool): If True, an error is thrown for duplicate route IDs
         """
         
         routing = validate_list_types(routing, str, param_name="routing", curr_sim_step=self.curr_step)
@@ -2735,12 +2932,18 @@ class Simulation:
                 desc = "No valid path between edges '{0}' and '{1}.".format(routing[0], routing[-1])
                 raise_error(ValueError, desc, self.curr_step)
 
-    def get_vehicle_vals(self, vehicle_ids: list|tuple|str, data_keys: str|list) -> dict|str|int|float|list:
+    def get_vehicle_vals(self, vehicle_ids: str|list|tuple, data_keys: str|list) -> dict|str|int|float|list:
         """
-        Get data values for specific vehicle using a list of data keys.
-        :param vehicle_ids: Vehicle ID or list of IDs
-        :param data_keys:   List of keys from [type|length|speed|is_stopped|max_speed|acceleration|position|altitude|heading|departure|edge_id|lane_idx|origin|destination|route_id|route_idx|route_edges], or single key
-        :return dict:       Values by data_key (or single value)
+        Get data values for specific vehicle using a list of data keys. Valid data keys are; '_type_', '_length_',
+        '_speed_', '_is_stopped_', '_max_speed_', '_acceleration_', '_position_', '_altitude_', '_heading_', '_departure_',
+        '_edge_id_', '_lane_idx_', '_origin_', '_destination_', '_route_id_', '_route_idx_', '_route_edges_'.
+        
+        Args:
+            `vehicle_ids` (str, list, tuple): Vehicle ID or list of IDs
+            `data_keys` (str, list): Data key or list of keys
+        
+        Returns:
+            (dict, str, int, float, list): Values by `data_key` (or single value)
         """
 
         all_data_vals = {}
@@ -2874,11 +3077,15 @@ class Simulation:
 
         return all_data_vals
     
-    def get_vehicle_data(self, vehicle_ids: str) -> dict:
+    def get_vehicle_data(self, vehicle_ids: str|list|tuple) -> dict|None:
         """
-        Get data for specified vehicle, updating _known_vehicles dict.
-        :param vehicle_ids: Vehicle ID or list of IDs
-        :return dict:       Vehicle data dictionary, returns None if does not exist in simulation
+        Get data for specified vehicle(s).
+        
+        Args:
+            `vehicle_ids` (str, list, tuple): Vehicle ID or list of IDs
+        
+        Returns:
+            (dict, None): Vehicle data dictionary, returns None if does not exist in simulation
         """
 
         all_vehicle_data = {}
@@ -2942,9 +3149,13 @@ class Simulation:
     def get_all_vehicle_data(self, vehicle_types: list|tuple|None = None, all_dynamic_data: bool=True) -> dict:
         """
         Collects aggregated vehicle data (no. vehicles & no. waiting vehicles) and all individual vehicle data.
-        :param vehicle_types: Type(s) of vehicles to include
-        :param all_dynamic_data: Denotes whether to return all individual static & dynamic vehicle data (returns empty dictionary if false)
-        :return dict: no vehicles, no waiting, all vehicle data
+        
+        Args:
+            `vehicle_types` (list, tuple, None): Type(s) of vehicles to include
+            `all_dynamic_data` (bool): Denotes whether to return all individual static & dynamic vehicle data (returns empty dictionary if false)
+        
+        Returns:
+            dict: no vehicles, no waiting, all vehicle data
         """
 
         all_vehicle_data = {}
@@ -2968,15 +3179,20 @@ class Simulation:
 
         return total_vehicle_data["no_vehicles"], total_vehicle_data["no_waiting"], all_vehicle_data
     
-    def get_geometry_vals(self, geometry_ids: str|int, data_keys: str|list) -> dict|str|int|float|list:
+    def get_geometry_vals(self, geometry_ids: str|list|tuple, data_keys: str|list) -> dict|str|int|float|list:
         """
-        Get data values for specific edge or lane using a list of data keys, from: (edge or lane) vehicle_count,
-        vehicle_ids, vehicle_speed, avg_vehicle_length,  halting_no, vehicle_occupancy, curr_travel_time, ff_travel_time, emissions,
-        length, max_speed | (edge only) connected_edges, incoming_edges, outgoing_edges, street_name, n_lanes,
-        lane_ids | (lane only) edge_id, n_links, allowed, disallowed, left_lc, right_lc
-        :param geometry_ids: Either edge or lane ID or list of edge or lane IDs
-        :param data_keys:    List of keys or single key
-        :return dict:        Values by data_key (or single value)
+        Get data values for specific edge or lane using a list of data keys. Valid data keys are; (edge or lane) '_vehicle_count_',
+        '_vehicle_ids_', '_vehicle_speed_', '_avg_vehicle_length_',  '_halting_no_', '_vehicle_occupancy_', '_curr_travel_time_',
+        '_ff_travel_time_', '_emissions_', '_length_', '_max_speed_' | (edge only) '_connected_edges_', '_incoming_edges_',
+        '_outgoing_edges_', '_street_name_', '_n_lanes_', '_lane_ids_' | (lane only) '_edge_id_', '_n_links_', '_allowed_',
+        '_disallowed_', '_left_lc_', '_right_lc_'.
+        
+        Args:
+            `geometry_ids` (str, int): Edge/lane ID or list of IDs
+            `data_keys` (str, list): Data key or list of keys
+        
+        Returns:
+            dict: Values by `data_key` (or single value)
         """
 
         all_data_vals = {}
@@ -3140,15 +3356,17 @@ class Simulation:
 
         return all_data_vals
 
-    def set_geometry_vals(self, geometry_ids: str|int, **kwargs) -> None:
+    def set_geometry_vals(self, geometry_ids: str|list|tuple, **kwargs) -> None:
         """
         Calls the TraCI API to change a edge or lane's state.
-        :param geometry_ids: Edge or lane ID or list of edge or lane IDs
-        :param max_speed:    Set new max speed value [int|float]
-        :param allowed:      Set allowed vehicle types [(str)], empty list allows all (lane only)
-        :param disallowed:   Set disallowed vehicle types [(str)] (lane only)
-        :param left_lc:      Set left lane changing vehicle permission with by vehicle_type list [(str)] (lane only)
-        :param right_lc:     Set right lane changing vehicle permission with by vehicle_type list [(str)] (lane only)
+
+        Args:
+            `geometry_ids` (str, list, tuple): Edge or lane ID or list of edge or lane IDs
+            `max_speed` (int, float): Set new max speed value
+            `allowed` (list): List of allowed vehicle type IDs, empty list allows all (lane only)
+            `disallowed` (list): List of disallowed vehicle type IDs
+            `left_lc` (list): Set left lane changing vehicle permission with by vehicle_type IDs (lane only)
+            `right_lc` (list): Set right lane changing vehicle permission with by vehicle_type IDs (lane only)
         """
         
         if isinstance(geometry_ids, str): geometry_ids = [geometry_ids]
@@ -3234,10 +3452,14 @@ class Simulation:
     def get_last_step_geometry_vehicles(self, geometry_ids: str|list, vehicle_types: list|None = None, flatten: bool = False) -> dict|list:
         """
         Get the IDs of vehicles on a lane or egde, by geometry ID.
-        :param geometry_ids:  Lane or edge ID or list of lane or edge IDs
-        :param vehicle_types: Included vehicle types
-        :param flatten:       If true, all IDs are returned in a 1D array, else a dict with vehicles for each lane or edge
-        :return dict|list:    Dict or list containing all vehicle IDs
+        
+        Args:
+            `geometry_ids` (str, list):  Edge/lane ID or list of IDs
+            `vehicle_types` (list, None): Included vehicle type IDs
+            `flatten` (bool): If `True`, all IDs are returned in a 1D array, else a dict with vehicles for each edge/lane
+        
+        Returns:
+            (dict, list): List containing all vehicle IDs or dictionary containing IDs by edge/lane
         """
 
         geometry_ids = [geometry_ids] if not isinstance(geometry_ids, list) else geometry_ids
@@ -3261,8 +3483,12 @@ class Simulation:
     def geometry_exists(self, geometry_id: str|int) -> str|None:
         """
         Get geometry type by ID, if geometry with the ID exists.
-        :param geometry_id: Lane or edge ID
-        :return str|None:   Geometry type ['edge'|'lane'], or None if it does not exist.
+        
+        Args:
+            `geometry_id` (str, int): Lane or edge ID
+        
+        Returns:
+            (str, None):   Geometry type ['_edge_'|'_lane_'], or `None` if it does not exist
         """
 
         geometry_id = validate_type(geometry_id, str, "geometry_id", self.curr_step)
@@ -3274,8 +3500,12 @@ class Simulation:
     def detector_exists(self, detector_id: str) -> str|None:
         """
         Get detector type by ID, if a detector with the ID exists.
-        :param detector_id: Detector ID
-        :return str|None:   Detector type, or None if it does not exist.
+        
+        Args:
+            `detector_id` (str): Detector ID
+        
+        Returns:
+            (str, None): Detector type, or `None` if it does not exist
         """
 
         detector_id = validate_type(detector_id, str, "detector_id", self.curr_step)
@@ -3287,8 +3517,12 @@ class Simulation:
     def route_exists(self, route_id: str) -> str|None:
         """
         Get route edges by ID, if a route with the ID exists.
-        :param route_id:  Route ID
-        :return str|None: List of route edges, or None if it does not exist.
+        
+        Args:
+            `route_id` (str): Route ID
+        
+        Returns:
+            (str, None): List of route edges, or `None` if it does not exist.
         """
 
         route_id = validate_type(route_id, str, "route_id", self.curr_step)
@@ -3299,9 +3533,13 @@ class Simulation:
 
     def vehicle_type_exists(self, vehicle_type_id: str) -> bool:
         """
-        Get whether vehicle_type exists.
-        :param vehicle_type: Vehicle type ID
-        :return bool:        Denotes whether vehicle type exists
+        Get whether vehicle type exists by ID.
+        
+        Args:
+            `vehicle_type` (str): Vehicle type ID
+        
+        Returns:
+            bool: Denotes whether vehicle type exists
         """
 
         vehicle_type_id = validate_type(vehicle_type_id, str, "vehicle_type_id", self.curr_step)
@@ -3310,9 +3548,13 @@ class Simulation:
 
     def get_event_ids(self, event_statuses: str|list|tuple|None = None) -> list:
         """
-        Return event IDs by status, one or more of 'scheduled', 'active' or 'completed'.
-        :param event_statuses: Event status type or list of types
-        :return list: List of event IDs
+        Return event IDs by status, one or more of '_scheduled_', '_active_' or '_completed_'.
+        
+        Args:
+            `event_statuses` (str, list, tuple, None): Event status type or list of types
+        
+        Returns:
+            list: List of event IDs
         """
 
         valid_statuses = ["scheduled", "active", "completed"]
@@ -3330,9 +3572,13 @@ class Simulation:
 
     def event_exists(self, event_id: str) -> str|None:
         """
-        Get whether event with ID event_id exists.
-        :param event_id: Event ID
-        :return str|None: Returns None if it does not exist, otherwise status ('scheduled'|'active'|'completed')
+        Get whether event with the given ID exists.
+        
+        Args:
+            `event_id` (str): Event ID
+        
+        Returns:
+            (str, None): Returns `None` if it does not exist, otherwise status ['_scheduled_'|'_active_'|'_completed_']
         """
 
         if self._scheduler == None: return None
@@ -3341,8 +3587,12 @@ class Simulation:
     def controller_exists(self, controller_id: str) -> str|None:
         """
         Get whether controller with ID controller_id exists.
-        :param controller_id: Controller ID
-        :return str|None: Returns None if it does not exist, otherwise type ('VSLController'|'RGController')
+        
+        Args:
+            `controller_id` (str): Controller ID
+        
+        Returns:
+            (str, None): Returns `None` if it does not exist, otherwise type ['_VSLController_'|'_RGController_']
         """
 
         if controller_id in self.controllers: return self.controllers[controller_id].__name__()
@@ -3351,7 +3601,12 @@ class Simulation:
     def get_controller_ids(self, controller_types: str|list|tuple|None = None) -> list:
         """
         Return list of all controller IDs, or controllers of specified type ('VSLController' or 'RGController').
-        :return list: Controller IDs
+        
+        Args:
+            `controller_types` (str, list, tuple, None): Controller type, defaults to all
+        
+        Returns:
+            list: Controller IDs
         """
 
         valid_types = ["VSLController", "RGController"]
@@ -3370,7 +3625,9 @@ class Simulation:
     def remove_controllers(self, controller_ids: str|list|tuple) -> None:
         """
         Remove controllers and delete their collected data.
-        :param controller_ids: List of controller IDs or single ID
+        
+        Args:
+            `controller_ids` (str, list, tuple): Controller ID or list of IDs
         """
 
         if isinstance(controller_ids, str): controller_ids = [controller_ids]
@@ -3390,8 +3647,10 @@ class Simulation:
         Prints a summary of a sim_data file or dictionary, listing
         simulation details, vehicle statistics, detectors, controllers,
         tracked edges/junctions and events. The summary can also be saved
-        as a '.txt' file.
-        :param save_file: '.txt' filename, if given will be used to save summary
+        as a '_.txt_' file.
+        
+        Args:
+            save_file: '_.txt_' filename, if given will be used to save summary
         """
         print_summary(self._all_data, save_file)
 
@@ -3412,7 +3671,9 @@ def print_sim_data_struct(sim_data: Simulation|dict|str) -> None:
     are displayed at max 2D. '*' represents the maximum dimension value if
     the dimension size is inconsistent, and '+' denotes the array dimension is
     greater than 2.
-    :param sim_data: Either Simulation object, dictionary or sim_data filepath
+
+    Args:
+        `sim_data` (Simulation, dict, str): Either Simulation object, dictionary or sim_data filepath
     """
     
     sim_data = validate_type(sim_data, (str, dict, Simulation), "sim_data")
@@ -3504,23 +3765,31 @@ def _get_phase_string(curr_phases, masks):
     return phase_str
 
 class TrackedJunction:
-    def __init__(self, junc_id: str|int, sim: Simulation, junc_params: dict|str=None) -> None:
+    """ Junction object with automatic data collection. """
+
+    def __init__(self, junc_id: str, simulation: Simulation, junc_params: dict|str=None) -> None:
+        """
+        Args:
+            `junc_id` (str): Junction ID
+            `simulation` (Simulation): Simulation object
+            `junc_params` (dict, str): Junction parameters dictionary or filepath
+        """
         self.id = junc_id
-        self.sim = sim
+        self.sim = simulation
 
         node = self.sim.network.getNode(junc_id)
         self.incoming_edges = [e.getID() for e in node.getIncoming()]
         self.outgoing_edges = [e.getID() for e in node.getOutgoing()]
         self.position = traci.junction.getPosition(junc_id)
         
-        self.init_time = sim.curr_step
-        self.curr_time = sim.curr_step
+        self.init_time = self.sim.curr_step
+        self.curr_time = self.sim.curr_step
 
         self.track_flow = False
         self.measure_spillback = False
         self.measure_queues = False
         self.is_meter = False
-        self.has_tl = junc_id in sim._all_tls
+        self.has_tl = junc_id in self.sim._all_tls
 
         self._init_params = junc_params
 
@@ -3623,10 +3892,6 @@ class TrackedJunction:
     def __name__(self): return "TrackedJunction"
 
     def __dict__(self) -> dict:
-        """
-        Returns the current state of junction data as a dictionary.
-        :return dict: TrackedJunction data dictionary
-        """
 
         junc_dict = {"position": self.position, "incoming_edges": self.incoming_edges, "outgoing_edges": self.outgoing_edges,
                      "init_time": self.init_time, "curr_time": self.curr_time}
@@ -3654,9 +3919,7 @@ class TrackedJunction:
         return junc_dict
 
     def reset(self) -> None:
-        """
-        Resets junction data collection.
-        """
+        """ Resets junction data collection. """
         
         self.init_time = self.sim.curr_step
         self.curr_time = self.sim.curr_step
@@ -3684,7 +3947,10 @@ class TrackedJunction:
 
     def update(self, keep_data: bool = True) -> None:
         """
-        Update junction flow and TL data for the current time step.
+        Update junction object for the current time step.
+
+        Args:
+            `keep_data` (bool): Denotes whether to update junction data
         """
 
         self.curr_time = self.sim.curr_step
@@ -3745,7 +4011,7 @@ class TrackedJunction:
                     self.queue_delays.append(num_stopped * self.sim.step_length)
 
                 else:
-                    desc = "Cannot update queue length (no detector or entry/exit edges)"
+                    desc = "Cannot update meter '{0}' queue length (no detector or entry/exit edges)".format(self.id)
                     raise_error(KeyError, desc, self.sim.curr_step)
 
             if self.measure_spillback:
@@ -3760,7 +4026,14 @@ class TrackedJunction:
                 self.spillback_vehs.append(spillback_vehs)
 
 class TrackedEdge:
+    """ Edge object with automatic data collection. """
+
     def __init__(self, edge_id: str, simulation: Simulation) -> None:
+        """
+        Args:
+            `edge_id` (str): Edge ID
+            `simulation` (Simulation): Simulation object
+        """
         self.id = edge_id
         self.sim = simulation
 
@@ -3791,10 +4064,7 @@ class TrackedEdge:
     def __name__(self): return "TrackedEdge"
 
     def __dict__(self) -> dict:
-        """
-        Returns the current state of edge data as a dictionary.
-        :return dict: TrackedEdge data dictionary
-        """
+
         edge_dict = {"linestring": self.linestring,
                      "length": self.length,
                      "to_node": self.to_node,
@@ -3811,9 +4081,7 @@ class TrackedEdge:
         return edge_dict
 
     def reset(self) -> None:
-        """
-        Resets edge data collection.
-        """
+        """ Resets edge data collection. """
 
         self.init_time = self.sim.curr_step
         self.curr_time = self.sim.curr_step
@@ -3825,6 +4093,12 @@ class TrackedEdge:
         self.occupancies = []
 
     def update(self, keep_data: bool = True) -> None:
+        """
+        Update edge object for the current time step.
+
+        Args:
+            `keep_data` (bool): Denotes whether to update edge data
+        """
         
         self.curr_time = self.sim.curr_step
         if keep_data:
@@ -3861,14 +4135,16 @@ class TrackedEdge:
         x_pct = x_val/line.length
         return x_pct
 
-def print_summary(sim_data, save_file=None, tab_width=58):
+def print_summary(sim_data: dict|str, save_file: str|None=None, tab_width: int=58):
     """
     Prints a summary of a sim_data file or dictionary, listing
     simulation details, vehicle statistics, detectors, controllers,
     tracked edges/junctions and events.
-    :param sim_data:  Simulation data dictionary or filepath
-    :param save_file: '.txt' filename, if given will be used to save summary
-    :param tab_width: Table width
+    
+    Args:
+        `sim_data` (dict, str):  Simulation data dictionary or filepath
+        `save_file` (str, None): '_.txt_' filename, if given will be used to save summary
+        `tab_width` (int): Table width
     """
     caller = "{0}()".format(inspect.stack()[0][3])
     if save_file != None:

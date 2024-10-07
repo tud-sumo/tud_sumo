@@ -4,7 +4,12 @@ from random import random
 from .utils import *
 
 class EventScheduler:
+    """ Event manager that stores, tracks and implements events. """
     def __init__(self, sim):
+        """
+        Args:
+            `sim` (Simulation): Simulation object
+        """
         from .simulation import Simulation
 
         self.sim = sim
@@ -28,7 +33,17 @@ class EventScheduler:
     def __str__(self): return "<{0}>".format(self.__name__)
     def __name__(self): return "EventScheduler"
 
-    def get_event_ids(self, event_statuses=None):
+    def get_event_ids(self, event_statuses: str|list|tuple|None=None) -> list:
+        """
+        Gets all event IDs, or those of a specific status.
+
+        Args:
+            `event_statuses` (str, list, tuple, None): Event status or list of statuses from ['_scheduled_'|'_active_'|'_completed_'] (defaults to all)
+
+        Returns:
+            list: List of event IDs
+        """
+
         if event_statuses == None: event_statuses = ["scheduled", "active", "completed"]
         elif isinstance(event_statuses, str): event_statuses = [event_statuses]
 
@@ -42,7 +57,17 @@ class EventScheduler:
 
         return event_ids
     
-    def get_events(self, event_statuses=None):
+    def get_events(self, event_statuses: str|list|tuple|None=None) -> list:
+        """
+        Gets all events, or those of a specific status.
+
+        Args:
+            `event_statuses` (str, list, tuple, None): Event status or list of statuses from ['_scheduled_'|'_active_'|'_completed_'] (defaults to all)
+
+        Returns:
+            list: List of events
+        """
+                
         if event_statuses == None: event_statuses = ["scheduled", "active", "completed"]
         elif isinstance(event_statuses, str): event_statuses = [event_statuses]
 
@@ -56,7 +81,13 @@ class EventScheduler:
 
         return events
     
-    def add_events(self, events):
+    def add_events(self, events) -> None:
+        """
+        Add events to the schedule.
+
+        Args:
+            `events` (Event, str, list, tuple, dict): Event, list of events, dictionary of event parameters or path to parameters file
+        """
 
         if isinstance(events, Event): self.scheduled_events[events.id] = events
 
@@ -93,6 +124,7 @@ class EventScheduler:
                 raise_error(TypeError, desc, self.sim.curr_step)
 
     def update_events(self):
+        """ Update & implement all events. """
         
         scheduled_event_ids = list(self.scheduled_events.keys())
         for event_id in scheduled_event_ids:
@@ -111,7 +143,16 @@ class EventScheduler:
                 del self.active_events[event_id]
                 self.completed_events[event_id] = event
 
-    def get_event_status(self, event_id):
+    def get_event_status(self, event_id: str) -> str|None:
+        """
+        Get the status of an event, by its ID.
+        
+        Args:
+            `event_id` (str): Event ID
+        
+        Returns:
+            (str, None): Event status ['_scheduled_'|'_active_'|'_completed_'], or `None` if it does not exist
+        """
 
         if event_id in self.scheduled_events.keys(): return "scheduled"
         elif event_id in self.active_events.keys(): return "active"
@@ -119,9 +160,18 @@ class EventScheduler:
         else: return None
 
 class Event:
-    def __init__(self, event_id, event_params, sim):
+    """ A scheduled event, where effects are carried out for a specified amount of time. """
+
+    def __init__(self, event_id: str, event_params: str|dict, simulation):
+        """
+        Args:
+            `event_id` (str): Event ID
+            `event_params` (str, dict): Event parameters dictionary or path to parameters file
+            `simulation` (Simulation): Simulation object
+        """
+
         self.id = event_id
-        self.sim = sim
+        self.sim = simulation
 
         self._init_params = event_params
 
@@ -246,6 +296,7 @@ class Event:
     def __name__(self): return "Event"
 
     def start(self):
+        """ Start the scheduled event. """
 
         if self.e_actions != None:
             for edge_id in self.edge_ids:
@@ -271,6 +322,7 @@ class Event:
         self.v_effects_active = self.v_actions != None
 
     def run(self):
+        """ Implement any event effects. """
 
         if self.e_actions != None:
             if self.end_time <= self.sim.curr_step and self.e_effects_active:
@@ -358,4 +410,10 @@ class Event:
                         self.sim.remove_vehicles(vehicle_id)
 
     def is_active(self):
+        """
+        Returns whether the event is currently active.
+
+        Returns:
+            bool: Denotes whether the event is active
+        """
         return self.e_effects_active or self.v_effects_active
