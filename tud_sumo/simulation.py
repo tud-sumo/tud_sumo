@@ -1607,23 +1607,23 @@ class Simulation:
         if len(all_data_vals) == 1: return all_data_vals[data_keys[0]]
         else: return all_data_vals
 
-    def set_phases(self, new_junc_phases: dict, start_phase: int = 0, overwrite: bool = True) -> None:
+    def set_phases(self, junction_phases: dict, start_phase: int = 0, overwrite: bool = True) -> None:
         """
         Sets the phases for the simulation, starting at the next simulation step.
-        :param new_junc_phases: Junction phases and times dictionary
+        :param junction_phases: Dictionary containing junction phases and times
         :param start_phase:     Phase number to start at, defaults to 0
-        :param overwrite:       If true, the junc_phases dict is overwitten with new_junc_phases. If false, only specific junctions are overwritten.
+        :param overwrite:       If true, the junc_phases dict is overwitten with junction_phases. If false, only specific junctions are overwritten.
         """
 
         # If overwriting, the junc phases dictionary is replaced with
         # the new version. Otherwise, only specific junctions are overwritten.
         if overwrite or self._junc_phases == None:
-            self._junc_phases = new_junc_phases
+            self._junc_phases = junction_phases
         else:
-            for junc_id, new_phases in new_junc_phases.items():
+            for junc_id, new_phases in junction_phases.items():
                 self._junc_phases[junc_id] = deepcopy(new_phases)
 
-        for junc_id in new_junc_phases.keys():
+        for junc_id in junction_phases.keys():
 
             if junc_id not in list(traci.trafficlight.getIDList()):
                 desc = "Junction with ID '{0}' does not exist, or it does not have a traffic light.".format(junc_id)
@@ -1632,13 +1632,13 @@ class Simulation:
             junc_phase = self._junc_phases[junc_id]
 
             valid_params = {"times": list, "phases": list, "curr_phase": int}
-            error, desc = test_input_dict(junc_phase, valid_params, "'{0}' flow".format(junc_id), required=["times", "phases"])
+            error, desc = test_input_dict(junc_phase, valid_params, "'{0}' phases".format(junc_id), required=["times", "phases"])
             if error != None: raise_error(error, desc, self.curr_step)
 
             # Check times and colours match length, are of the right type, and assert all
             # phase times are greater than the simulation step length.
-            validate_list_types(junc_phase["times"], (int, float), param_name="phase times", curr_sim_step=self.curr_step)
-            validate_list_types(junc_phase["phases"], str, param_name="phase colours", curr_sim_step=self.curr_step)
+            validate_list_types(junc_phase["times"], (int, float), param_name="'{0}' phase times".format(junc_id), curr_sim_step=self.curr_step)
+            validate_list_types(junc_phase["phases"], str, param_name="'{0}' phase colours".format(junc_id), curr_sim_step=self.curr_step)
 
             if len(junc_phase["times"]) != len(junc_phase["phases"]):
                 desc = "'{0}' phase colours and times do not match length ('times' {1} != 'phases' {2}).".format(junc_id, len(junc_phase["times"]), len(junc_phase["phases"]))
@@ -1655,7 +1655,105 @@ class Simulation:
             junc_phase["curr_time"] = sum(junc_phase["times"][:junc_phase["curr_phase"]])
             junc_phase["cycle_len"] = sum(junc_phase["times"])
 
-        self._update_lights(list(new_junc_phases.keys()))
+        self._update_lights(list(junction_phases.keys()))
+
+    def set_m_phases(self, junction_phases: dict, start_phase: int = 0, overwrite: bool = True) -> None:
+        """
+        Sets the traffic light phases for the simulation based on movements, starting at the next simulation step.
+        :param junction_phases: Dictionary containing junction phases, times and masks for different movements
+        :param start_phase:     Phase number to start at, defaults to 0
+        :param overwrite:       If true, the junc_phases dict is overwitten with junction_phases. If false, only specific junctions are overwritten.
+        """
+
+        new_phase_dict = {}
+
+        for junction_id, junc_phase in junction_phases.items():
+
+            if junction_id not in list(traci.trafficlight.getIDList()):
+                desc = "Junction with ID '{0}' does not exist, or it does not have a traffic light.".format(junction_id)
+                raise_error(KeyError, desc, self.curr_step)
+            else:
+                if junction_id in self.tracked_junctions.keys():
+                    m_len = self.tracked_junctions[junction_id].m_len
+                else:
+                    state_str = traci.trafficlight.getRedYellowGreenState(junction_id)
+                    m_len = len(state_str)
+
+            valid_params = {"phases": dict, "times": dict, "masks": dict, "curr_phase": int}
+            error, desc = test_input_dict(junc_phase, valid_params, "'{0}' phase dict".format(junction_id), required=["times", "phases", "masks"])
+            if error != None: raise_error(error, desc, self.curr_step)
+
+            if set(junc_phase["phases"].keys()) == set(junc_phase["times"].keys()) == set(junc_phase["masks"].keys()):
+                m_keys = list(junc_phase["phases"].keys())
+
+                valid_params = {m_key: list for m_key in m_keys}
+                error, desc = test_input_dict(junc_phase["phases"], valid_params, "'{0}' phases".format(junction_id), required=True)
+                if error != None: raise_error(error, desc, self.curr_step)
+
+                cycle_length = None
+                for m_key in m_keys:
+                    colours, times, mask = junc_phase["phases"][m_key], junc_phase["times"][m_key], junc_phase["masks"][m_key]
+
+                    validate_list_types(colours, str, param_name="junction '{0}', movement '{1}' colours".format(junction_id, m_key), curr_sim_step=self.curr_step)
+                    validate_list_types(times, (int, float), param_name="junction '{0}', movement '{1}' times".format(junction_id, m_key), curr_sim_step=self.curr_step)
+
+                    if not isinstance(mask, str):
+                        desc = "Invalid mask in junction '{0}', movement '{1}' (mask '{2}' is '{3}', must be str).".format(junction_id, m_key, mask, type(mask).__name__)
+                        raise_error(TypeError, desc, self.curr_step)
+                    elif len(mask) != m_len:
+                        desc = "Invalid mask in junction '{0}', movement '{1}' (mask '{2}' length does not match junction '{3}').".format(junction_id, m_key, mask, m_len)
+                        raise_error(ValueError, desc, self.curr_step)
+
+                    if len(colours) != len(times):
+                        desc = "Invalid phases in junction '{0}', movement '{1}' (colour and time arrays are different lengths).".format(junction_id, m_key)
+                        raise_error(ValueError, desc, self.curr_step)
+                    elif cycle_length != None and sum(times) != cycle_length:
+                        desc = "Invalid phases in junction '{0}', movement '{1}' (movement cycle length '{2}' != junction cycle length '{3}').".format(junction_id, m_key, sum(times), cycle_length)
+                        raise_error(ValueError, desc, self.curr_step)
+                    else: cycle_length = sum(times)
+
+                    valid_colours = {"G", "g", "y", "r", "-"}
+                    invalid_colours = list(set(colours) - valid_colours)
+                    if len(invalid_colours) > 0:
+                        invalid_colours.sort()
+                        desc = "Invalid phase colour(s) in junction '{0}', movement '{1}' (['{2}'] are invalid, must be in ['{3}']).".format(junction_id, m_key, "','".join(invalid_colours), "'|'".join(list(valid_colours)))
+                        raise_error(ValueError, desc, self.curr_step)
+
+                complete, new_junc_phases = False, {"phases": [], "times": []}
+
+                all_phases, all_times = junc_phase["phases"], junc_phase["times"]
+                curr_phases = {m_key: junc_phase["phases"][m_key][0] for m_key in m_keys}
+                curr_times = {m_key: junc_phase["times"][m_key][0] for m_key in m_keys}
+                masks = junc_phase["masks"]
+
+                while not complete:
+
+                    phase_colours = _get_phase_string(curr_phases, masks)
+                    phase_time = min(list(curr_times.values()))
+
+                    new_junc_phases["phases"].append(phase_colours)
+                    new_junc_phases["times"].append(phase_time)
+
+                    for m_key in m_keys:
+                        curr_times[m_key] -= phase_time
+
+                        if curr_times[m_key] <= 0:
+                            all_phases[m_key].pop(0)
+                            all_times[m_key].pop(0)
+                            
+                            if len(all_phases[m_key]) > 0:
+                                curr_phases[m_key] = all_phases[m_key][0]
+                                curr_times[m_key] = all_times[m_key][0]
+
+                    complete = sum([len(phases) for phases in all_phases.values()]) == 0
+
+                new_phase_dict[junction_id] = new_junc_phases
+
+            else:
+                desc = "Invalid phases for junction '{0}' (movement keys do not match).".format(junction_id)
+                raise_error(KeyError, desc, self.curr_step)
+
+        self.set_phases(new_phase_dict, start_phase, overwrite)
 
     def set_tl_colour(self, junction_id: str|int, colour_str: str) -> None:
         """
@@ -3391,6 +3489,19 @@ def _get_2d_shape(array):
             if deeper: return_str += "+"
             return return_str
     else: return "(1x{0})".format(x)
+
+def _get_phase_string(curr_phases, masks):
+
+    m_len = len(list(masks.values())[0])
+    phase_arr = ['-'] * m_len
+    
+    for m_key in masks.keys():
+        for idx in range(m_len):
+            if masks[m_key][idx] == "1":
+                phase_arr[idx] = curr_phases[m_key]
+
+    phase_str = "".join(phase_arr)
+    return phase_str
 
 class TrackedJunction:
     def __init__(self, junc_id: str|int, sim: Simulation, junc_params: dict|str=None) -> None:
