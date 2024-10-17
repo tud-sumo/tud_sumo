@@ -13,32 +13,12 @@ from .utils import *
 class Simulation:
     """ Main simulation interface."""
 
-    def __init__(self, scenario_name: str|None = None, scenario_desc: str|None = None, sumo_home: str|None = None) -> None:
+    def __init__(self, scenario_name: str|None = None, scenario_desc: str|None = None) -> None:
         """
         Args:
             `scenario_name` (str, None): Scenario label saved to simulation object (defaults to name of '_.sumocfg_')
             `scenario_desc` (str, None): Simulation scenario description, saved along with all files
-            `sumo_home` (str, None): SUMO base directory, if `$SUMO_HOME` variable not already set within environment
         """
-
-        if isinstance(sumo_home, str):
-            if os.path.exists(sumo_home):
-                os.environ["SUMO_HOME"] = sumo_home
-            else:
-                desc = "SUMO_HOME filepath '{0}' does not exist.".format(sumo_home)
-                raise_error(FileNotFoundError, desc)
-        elif sumo_home != None:
-            desc = "Invalid SUMO_HOME '{0}' (must be str, not '{1}').".format(sumo_home, type(sumo_home).__name__)
-            raise_error(TypeError, desc)
-
-        if "SUMO_HOME" in os.environ:
-            path_tools = os.path.join(os.environ.get("SUMO_HOME"), 'tools')
-        else:
-            desc = "Environment SUMO_HOME variable not set."
-            raise_error(SimulationError, desc)
-
-        if path_tools in sys.path: pass
-        else: sys.path.append(path_tools)
 
         self.curr_step = 0
         self.step_length = None
@@ -103,7 +83,7 @@ class Simulation:
 
     def __dict__(self): return {} if self._all_data == None else self._all_data
 
-    def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, gui_file: str|None = None, cmd_options: list|None = None, units: str|int = 1, get_individual_vehicle_data: bool = True, automatic_subscriptions: bool = True, suppress_warnings: bool = False, suppress_traci_warnings: bool = True, suppress_pbar: bool = False, seed: str = "random", gui: bool = False) -> None:
+    def start(self, config_file: str|None = None, net_file: str|None = None, route_file: str|None = None, add_file: str|None = None, gui_file: str|None = None, cmd_options: list|None = None, units: str|int = 1, get_individual_vehicle_data: bool = True, automatic_subscriptions: bool = True, suppress_warnings: bool = False, suppress_traci_warnings: bool = True, suppress_pbar: bool = False, seed: str = "random", gui: bool = False, sumo_home: str|None = None) -> None:
         """
         Intialises SUMO simulation.
 
@@ -122,7 +102,27 @@ class Simulation:
             `suppress_pbar` (bool): Suppress automatic progress bar when not using the GUI
             `seed` (bool): Either int to be used as seed, or `random.random()`/`random.randint()`, where a random seed is used
             `gui` (bool): Bool denoting whether to run GUI
+            `sumo_home` (str, None): SUMO base directory, if `$SUMO_HOME` variable not already set within environment
         """
+
+        if isinstance(sumo_home, str):
+            if os.path.exists(sumo_home):
+                os.environ["SUMO_HOME"] = sumo_home
+            else:
+                desc = "SUMO_HOME filepath '{0}' does not exist.".format(sumo_home)
+                raise_error(FileNotFoundError, desc)
+        elif sumo_home != None:
+            desc = "Invalid SUMO_HOME '{0}' (must be str, not '{1}').".format(sumo_home, type(sumo_home).__name__)
+            raise_error(TypeError, desc)
+
+        if "SUMO_HOME" in os.environ:
+            path_tools = os.path.join(os.environ.get("SUMO_HOME"), 'tools')
+        else:
+            desc = "Environment SUMO_HOME variable not set."
+            raise_error(SimulationError, desc)
+
+        if path_tools in sys.path: pass
+        else: sys.path.append(path_tools)
 
         self._start_called = True
         self._gui = gui
